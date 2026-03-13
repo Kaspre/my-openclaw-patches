@@ -26,16 +26,16 @@ BACKUP_SUFFIX = ".bak-exec-host"
 
 SEARCH_PATTERN = 'requestedHost !== configuredHost) throw new Error'
 
-# The full old pattern (single long line in minified JS)
+# The full old pattern — single line in minified JS (v2026.3.12+)
 THROW_OLD = (
-    'if (!elevatedRequested && requestedHost && requestedHost !== configuredHost)\n'
-    '    throw new Error(`exec host not allowed (requested ${renderExecHostLabel(requestedHost)}'
+    'if (!elevatedRequested && requestedHost && requestedHost !== configuredHost)'
+    ' throw new Error(`exec host not allowed (requested ${renderExecHostLabel(requestedHost)}'
     '; configure tools.exec.host=${renderExecHostLabel(configuredHost)} to allow).`);'
 )
 
 THROW_NEW = (
-    'if (!elevatedRequested && requestedHost && requestedHost !== configuredHost)\n'
-    '    host = configuredHost;'
+    'if (!elevatedRequested && requestedHost && requestedHost !== configuredHost)'
+    ' host = configuredHost;'
 )
 
 

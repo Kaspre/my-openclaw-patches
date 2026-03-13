@@ -48,10 +48,22 @@ REPLACEMENTS = [
 ]
 
 
-def find_compact_files(dist_dir):
-    pattern = os.path.join(dist_dir, "compact-*.js")
-    files = [f for f in glob.glob(pattern) if ".bak" not in f]
-    return sorted(files)
+def find_target_files(dist_dir):
+    """Find JS files containing the memoryFlush counter pattern.
+    v2026.3.8 used compact-*.js; v2026.3.12+ bundles into config-*.js and others."""
+    patterns = [
+        os.path.join(dist_dir, "*.js"),
+        os.path.join(dist_dir, "plugin-sdk", "*.js"),
+    ]
+    all_js = []
+    for pat in patterns:
+        all_js.extend(f for f in glob.glob(pat) if ".bak" not in f)
+    target = []
+    for f in sorted(all_js):
+        with open(f, "r") as fh:
+            if "incrementCompactionCount" in fh.read():
+                target.append(f)
+    return target
 
 
 def apply_patch(filepath, dry_run=False):
@@ -102,13 +114,13 @@ def main():
     parser.add_argument("--dist-dir", default=DIST_DIR_DEFAULT, help="OpenClaw dist directory")
     args = parser.parse_args()
 
-    files = find_compact_files(args.dist_dir)
+    files = find_target_files(args.dist_dir)
     if not files:
-        print(f"ERROR: No compact-*.js files found in {args.dist_dir}")
+        print(f"ERROR: No files containing incrementCompactionCount found in {args.dist_dir}")
         sys.exit(1)
 
     print(f"memoryFlush Skip-Every-Other Fix {'(DRY RUN)' if args.dry_run else ''}")
-    print(f"Found {len(files)} compact file(s)")
+    print(f"Found {len(files)} file(s) with compaction counter")
     print()
 
     patched = 0

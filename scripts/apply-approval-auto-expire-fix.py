@@ -26,23 +26,23 @@ BACKUP_SUFFIX = ".bak-autoexpire"
 
 # --- Replacement patterns (tab-indented to match bundle code) ---
 
-PATCH_OLD = """\thasExecApprovalClients: () => {
-\t\tfor (const gatewayClient of clients) {
-\t\t\tconst scopes = Array.isArray(gatewayClient.connect.scopes) ? gatewayClient.connect.scopes : [];
-\t\t\tif (scopes.includes("operator.admin") || scopes.includes("operator.approvals")) return true;
-\t\t}
-\t\treturn false;
-\t},"""
+PATCH_OLD = """\t\thasExecApprovalClients: () => {
+\t\t\tfor (const gatewayClient of clients) {
+\t\t\t\tconst scopes = Array.isArray(gatewayClient.connect.scopes) ? gatewayClient.connect.scopes : [];
+\t\t\t\tif (scopes.includes("operator.admin") || scopes.includes("operator.approvals")) return true;
+\t\t\t}
+\t\t\treturn false;
+\t\t},"""
 
-PATCH_NEW = """\thasExecApprovalClients: () => {
-\t\tfor (const gatewayClient of clients) {
-\t\t\tconst scopes = Array.isArray(gatewayClient.connect.scopes) ? gatewayClient.connect.scopes : [];
-\t\t\tif (scopes.includes("operator.admin") || scopes.includes("operator.approvals")) return true;
-\t\t}
-\t\tconst discordCfg = cfgAtStart?.channels?.discord;
-\t\tif (discordCfg?.execApprovals?.enabled && discordCfg?.enabled !== false) return true;
-\t\treturn false;
-\t},"""
+PATCH_NEW = """\t\thasExecApprovalClients: () => {
+\t\t\tfor (const gatewayClient of clients) {
+\t\t\t\tconst scopes = Array.isArray(gatewayClient.connect.scopes) ? gatewayClient.connect.scopes : [];
+\t\t\t\tif (scopes.includes("operator.admin") || scopes.includes("operator.approvals")) return true;
+\t\t\t}
+\t\t\tconst discordCfg = cfgAtStart?.channels?.discord;
+\t\t\tif (discordCfg?.execApprovals?.enabled && discordCfg?.enabled !== false) return true;
+\t\t\treturn false;
+\t\t},"""
 
 REPLACEMENTS = [
     ("hasExecApprovalClients()", PATCH_OLD, PATCH_NEW),
