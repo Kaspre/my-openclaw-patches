@@ -15,7 +15,7 @@ python3 scripts/apply-all.py
 systemctl --user restart openclaw-gateway
 ```
 
-## Current Patches (v2026.3.8)
+## Current Patches (v2026.3.12)
 
 | # | Script | Issue | Files | Description |
 |---|--------|-------|-------|-------------|
@@ -27,6 +27,7 @@ systemctl --user restart openclaw-gateway
 | 6 | `apply-memoryflush-fix.py` | #12590 | 1 | Fix flush skipping every other compaction |
 | 7 | `apply-session-key-cli.py` | PR #35241 | 2 | Add `--session-key` flag to `openclaw agent` |
 | 8 | `apply-ui-message-vanish-fix.py` | #14928 / #9183 | 1 | Fix user messages vanishing in dashboard |
+| 9 | `ws-handshake-timeout.sh` | #44718 / PRs #44784 #44849 | 29 | Increase WS handshake timeouts (server 3s→15s, client 2s→10s) |
 
 ## Usage
 

@@ -59,6 +59,20 @@
    systemctl --user start openclaw-watchdog.timer
    ```
 
+## Post-Upgrade Verification (config regressions)
+
+Upgrades have reset non-openclaw.json config files. Check these EVERY time:
+
+1. **`tools.exec.ask`** — must be `"off"` (OC Firewall is sole enforcer). Upgrades have reset it to `"on-miss"`.
+   ```bash
+   openclaw config get tools.exec.ask   # expect: off
+   ```
+
+2. **`exec-approvals.json` main agent security** — must be `"full"`. Upgrades have reset it to `"allowlist"`, which creates a redundant gateway allowlist that blocks tools not in the list (e.g. pandoc) even though OC Firewall allows them.
+   ```bash
+   grep -A1 '"main"' ~/.openclaw/exec-approvals.json | grep security   # expect: "full"
+   ```
+
 ## Post-Patch Testing
 
 - Verify: `openclaw --version && systemctl --user status openclaw-gateway --no-pager`
@@ -90,3 +104,4 @@ If something goes wrong:
 | 2026-03-09 | 2026.3.7 | 2026.3.8 | First attempt: all 3 patches applied, approval prefix-match caused auto-expire bug |
 | 2026-03-09 | 2026.3.8 | 2026.3.7 | Rolled back to isolate cause |
 | 2026-03-09 | 2026.3.7 | 2026.3.8 | Second attempt: 2 patches only (dropped prefix-match), working |
+| 2026-03-13 | 2026.3.8 | 2026.3.12 | 8 patches applied (3 scripts updated). Regressions: tools.exec.ask reset to "on-miss", exec-approvals.json main security reset to "allowlist" |
