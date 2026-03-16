@@ -14,6 +14,7 @@ Patches are applied in dependency order:
   6. memoryflush-fix         — flush fires every compaction
   7. session-key-cli         — --session-key flag for openclaw agent
   8. ui-message-vanish       — dashboard user message persistence
+  9. loglevel-fix            — inverted levelToMinLevel mapping
 """
 
 import argparse
@@ -32,6 +33,7 @@ PATCHES = [
     ("memoryflush-fix", "apply-memoryflush-fix.py"),
     ("session-key-cli", "apply-session-key-cli.py"),
     ("ui-message-vanish", "apply-ui-message-vanish-fix.py"),
+    ("loglevel-fix", "apply-loglevel-fix.py"),
 ]
 
 

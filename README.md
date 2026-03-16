@@ -15,7 +15,7 @@ python3 scripts/apply-all.py
 systemctl --user restart openclaw-gateway
 ```
 
-## Current Patches (v2026.3.12)
+## Current Patches (v2026.3.13)
 
 | # | Script | Issue | Files | Description |
 |---|--------|-------|-------|-------------|
@@ -28,6 +28,7 @@ systemctl --user restart openclaw-gateway
 | 7 | `apply-session-key-cli.py` | PR #35241 | 2 | Add `--session-key` flag to `openclaw agent` |
 | 8 | `apply-ui-message-vanish-fix.py` | #14928 / #9183 | 1 | Fix user messages vanishing in dashboard |
 | 9 | `ws-handshake-timeout.sh` | #44718 / PRs #44784 #44849 | 29 | Increase WS handshake timeouts (server 3s→15s, client 2s→10s) |
+| 10 | `apply-loglevel-fix.py` | #29448 / PR #44646 | 9 | Fix inverted levelToMinLevel mapping (debug logging broken) |
 
 ## Usage
 
@@ -47,12 +48,21 @@ python3 scripts/apply-all.py --only approval-auto-expire approval-prefix-match a
 python3 scripts/apply-all.py --skip ui-message-vanish
 ```
 
+## MG Extension Workarounds
+
+These are not source patches — they live in `~/.openclaw/extensions/memory-guardian/index.ts` and survive upgrades.
+
+| Workaround | Issue | Description |
+|-----------|-------|-------------|
+| Pre-compaction context dump | #19488 | Mechanically dumps conversation to `memory/pre-compaction-*.md` before compaction; MG injects pointer post-compaction. Docs: `~/.openclaw/workspace/patches/pre-compaction-context-dump.md` |
+
 ## After OpenClaw Upgrades
 
 1. Run `python3 scripts/apply-all.py --dry-run` to check which patches still apply
 2. Patterns that don't match may need updating (filenames and code change per version)
 3. Check upstream release notes — some patches may have been merged
 4. Apply, restart gateway, test
+5. Verify MG extension workarounds still function (check `before_compaction` hook output)
 
 ## How It Works
 
