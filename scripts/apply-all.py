@@ -15,6 +15,7 @@ Patches are applied in dependency order:
   7. session-key-cli         — --session-key flag for openclaw agent
   8. ui-message-vanish       — dashboard user message persistence
   9. loglevel-fix            — inverted levelToMinLevel mapping
+ 10. plugin-cache-global     — process-global plugin registry cache
 """
 
 import argparse
@@ -34,6 +35,7 @@ PATCHES = [
     ("session-key-cli", "apply-session-key-cli.py"),
     ("ui-message-vanish", "apply-ui-message-vanish-fix.py"),
     ("loglevel-fix", "apply-loglevel-fix.py"),
+    ("plugin-cache-global", "apply-plugin-cache-global.py"),
 ]
 
 

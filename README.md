@@ -29,6 +29,7 @@ systemctl --user restart openclaw-gateway
 | 8 | `apply-ui-message-vanish-fix.py` | #14928 / #9183 | 1 | Fix user messages vanishing in dashboard |
 | 9 | `ws-handshake-timeout.sh` | #44718 / PRs #44784 #44849 | 29 | Increase WS handshake timeouts (server 3s→15s, client 2s→10s) |
 | 10 | `apply-loglevel-fix.py` | #29448 / PR #44646 | 9 | Fix inverted levelToMinLevel mapping (debug logging broken) |
+| 11 | `apply-plugin-cache-global.py` | #47429 / #48380 | 7 | Process-global plugin registry cache (fixes cross-chunk duplicate activation) |
 
 ## Usage
 
