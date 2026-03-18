@@ -1,226 +1,200 @@
 #!/usr/bin/env node
 /**
- * Extract OpenClawSchema from daemon-cli.js and convert to JSON Schema.
+ * Extract OpenClawSchema from OpenClaw GitHub source and convert to JSON Schema.
+ *
+ * Usage:
+ *   node extract-schema.mjs [--output /path/to/schema.json] [--diff /path/to/old-schema.json] [--ref main]
+ *
+ * Environment variables:
+ *   SCHEMA_OUTPUT   — Output path (default: ~/.openclaw/workspace/docs/config-schema.json)
+ *   OPENCLAW_DIR    — OpenClaw install dir for Zod dependency (default: auto-detect)
  *
  * Strategy:
- *  1. Read lines 10266–14038 (schema definitions + dependencies)
- *  2. Read earlier utility functions needed by the schemas
- *  3. Strip .superRefine() calls (runtime validation, not structural)
- *  4. Stub out runtime dependencies (path, os, etc.)
- *  5. Eval the code with zod in scope
- *  6. Convert OpenClawSchema to JSON Schema via zod-to-json-schema
+ *   1. Download zod-schema source files + utility deps from GitHub
+ *   2. Generate a harness that imports OpenClawSchema and calls toJSONSchema()
+ *   3. Run via tsx (TypeScript execute) using OpenClaw's bundled Zod
+ *   4. Optionally diff against a previous schema
+ *
+ * Requirements:
+ *   - gh CLI (authenticated)
+ *   - tsx (npx tsx)
+ *   - OpenClaw installed (for Zod dependency)
+ *
+ * Caveats:
+ *   - Depends on OpenClaw's internal source structure. If files are renamed or
+ *     imports change, the download list may need updating.
+ *   - .superRefine() calls contain runtime validation that can't be represented
+ *     in JSON Schema — they are stripped automatically.
+ *   - Tested against v2026.3.8 and v2026.3.13. YMMV on future versions.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { resolve, join, dirname } from "node:path";
+import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 
-const OPENCLAW_DIR = "/home/captain/.nvm/versions/node/v25.6.1/lib/node_modules/openclaw";
-const SOURCE_FILE = `${OPENCLAW_DIR}/dist/daemon-cli.js`;
-const OUTPUT_FILE = "/home/captain/.openclaw/config.schema.json";
+// ── CLI args ───────────────────────────────────────────────────────────────
 
-// Read the full source
-const lines = readFileSync(SOURCE_FILE, "utf8").split("\n");
-
-// Helper to extract line range (1-indexed)
-function getLines(start, end) {
-  return lines.slice(start - 1, end).join("\n");
-}
-
-// --- Collect the code pieces ---
-
-// 1. Utility functions from early in the file
-const utilityCode = `
-// --- Stubs for runtime dependencies ---
-const path = {
-  isAbsolute(v) { return v.startsWith('/') || /^[A-Za-z]:[\\\\/]/.test(v); },
-  posix: {
-    normalize(v) { return v.replace(/\\/+/g, '/').replace(/\\/\\.\\//g, '/').replace(/(?!^\\/)\\/$/,''); }
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const opts = { ref: "main" };
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--output" && args[i + 1]) opts.output = args[++i];
+    else if (args[i] === "--diff" && args[i + 1]) opts.diff = args[++i];
+    else if (args[i] === "--ref" && args[i + 1]) opts.ref = args[++i];
+    else if (args[i] === "--openclaw-dir" && args[i + 1]) opts.openclawDir = args[++i];
+    else if (args[i] === "--keep-tmp") opts.keepTmp = true;
+    else if (args[i] === "--help" || args[i] === "-h") {
+      console.log(`Usage: node extract-schema.mjs [options]
+  --output FILE       Output path (default: ~/.openclaw/workspace/docs/config-schema.json)
+  --diff OLD_SCHEMA   Compare against previous schema and show changes
+  --ref REF           Git ref to fetch from (default: main). Use a tag like v2026.3.13.
+  --openclaw-dir DIR  OpenClaw install dir (for Zod). Auto-detected if omitted.
+  --keep-tmp          Don't delete temp directory after extraction
+  --help              Show this help`);
+      process.exit(0);
+    }
   }
-};
-
-// coerceSecretRef and normalizeSecretInputString stubs
-function normalizeSecretInputString(value) {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-function coerceSecretRef(value, defaults) {
-  // Stub: just check if it looks like a ref object
-  if (value && typeof value === 'object' && value.source && value.provider && value.id) return value;
-  return null;
-}
-function hasConfiguredSecretInput(value, defaults) {
-  if (normalizeSecretInputString(value)) return true;
-  return coerceSecretRef(value, defaults) !== null;
+  return opts;
 }
 
-// FILE_SECRET_REF_SEGMENT_PATTERN and isValidFileSecretRefId
-const FILE_SECRET_REF_SEGMENT_PATTERN = /^(?:[^~]|~0|~1)*$/;
-function isValidFileSecretRefId(value) {
-  if (value === "value") return true;
-  if (!value.startsWith("/")) return false;
-  return value.slice(1).split("/").every((segment) => FILE_SECRET_REF_SEGMENT_PATTERN.test(segment));
-}
+const opts = parseArgs();
+const OUTPUT_FILE = opts.output || process.env.SCHEMA_OUTPUT || join(homedir(), ".openclaw/workspace/docs/config-schema.json");
 
-// exec-safety
-const SHELL_METACHARS = /[;&|${'`'}$<>]/;
-const CONTROL_CHARS = /[\\r\\n]/;
-const QUOTE_CHARS = /["']/;
-const BARE_NAME_PATTERN = /^[A-Za-z0-9._+-]+$/;
-function isLikelyPath(value) {
-  if (value.startsWith(".") || value.startsWith("~")) return true;
-  if (value.includes("/") || value.includes("\\\\")) return true;
-  return /^[A-Za-z]:[\\\\/]/.test(value);
-}
-function isSafeExecutableValue(value) {
-  if (!value) return false;
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-  if (trimmed.includes("\\0")) return false;
-  if (CONTROL_CHARS.test(trimmed)) return false;
-  if (SHELL_METACHARS.test(trimmed)) return false;
-  if (QUOTE_CHARS.test(trimmed)) return false;
-  if (isLikelyPath(trimmed)) return true;
-  if (trimmed.startsWith("-")) return false;
-  return BARE_NAME_PATTERN.test(trimmed);
-}
+// ── Locate OpenClaw (for Zod) ──────────────────────────────────────────────
 
-// streaming mode helpers (stubs - only used in superRefine which we strip)
-function parseStreamingMode(v) { return typeof v === 'string' && ['off','partial','block','progress'].includes(v) ? v : undefined; }
-function parseDiscordPreviewStreamMode(v) { return typeof v === 'string' && ['off','partial','block'].includes(v) ? v : undefined; }
-function parseSlackLegacyDraftStreamMode(v) { return typeof v === 'string' ? v : undefined; }
-function mapSlackLegacyDraftStreamModeToStreaming(v) { return v || 'partial'; }
-function resolveTelegramPreviewStreamMode(params) { return 'partial'; }
-function resolveDiscordPreviewStreamMode(params) { return 'off'; }
-function resolveSlackStreamingMode(params) { return 'partial'; }
-function resolveSlackNativeStreaming(params) { return true; }
-
-// network mode (used in superRefine but also in SandboxDockerSchema superRefine)
-function normalizeNetworkMode(network) {
-  return network?.trim().toLowerCase() || undefined;
-}
-function getBlockedNetworkModeReason(params) {
-  const normalized = normalizeNetworkMode(params.network);
-  if (!normalized) return null;
-  if (normalized === "host") return "host";
-  if (normalized.startsWith("container:") && params.allowContainerNamespaceJoin !== true) return "container_namespace_join";
-  return null;
-}
-
-// byte size / duration parsers
-const UNIT_MULTIPLIERS = { b: 1, kb: 1024, k: 1024, mb: 1024**2, m: 1024**2, gb: 1024**3, g: 1024**3, tb: 1024**4, t: 1024**4 };
-function parseByteSize(raw, opts) {
-  const trimmed = String(raw ?? "").trim().toLowerCase();
-  if (!trimmed) throw new Error("invalid byte size (empty)");
-  const m = /^(\\d+(?:\\.\\d+)?)([a-z]+)?$/.exec(trimmed);
-  if (!m) throw new Error("invalid byte size: " + raw);
-  const value = Number(m[1]);
-  const multiplier = UNIT_MULTIPLIERS[(m[2] ?? opts?.defaultUnit ?? "b").toLowerCase()];
-  if (!multiplier) throw new Error("invalid byte size unit: " + raw);
-  return Math.round(value * multiplier);
-}
-function isValidNonNegativeByteSizeString(value) {
+function findOpenClawDir() {
+  if (opts.openclawDir) return opts.openclawDir;
+  if (process.env.OPENCLAW_DIR) return process.env.OPENCLAW_DIR;
   try {
-    const bytes = parseByteSize(String(value).trim(), { defaultUnit: "b" });
-    return bytes >= 0;
-  } catch { return false; }
-}
-
-const DURATION_MULTIPLIERS = { ms: 1, s: 1e3, m: 6e4, h: 36e5, d: 864e5 };
-function parseDurationMs(raw, opts) {
-  const trimmed = String(raw ?? "").trim().toLowerCase();
-  if (!trimmed) throw new Error("invalid duration (empty)");
-  const single = /^(\\d+(?:\\.\\d+)?)(ms|s|m|h|d)?$/.exec(trimmed);
-  if (single) {
-    const value = Number(single[1]);
-    const unit = single[2] ?? opts?.defaultUnit ?? "ms";
-    return Math.round(value * DURATION_MULTIPLIERS[unit]);
-  }
-  throw new Error("invalid duration: " + raw);
-}
-
-// telegram custom commands, validation helpers — defined within schema code block
-// forEachEnabledAccount, validateTelegramWebhookSecretRequirements,
-// validateSlackSigningSecretRequirements — defined within schema code block (lines 11917-11964)
-// Note: normalizeAllowFrom, requireOpenAllowFrom, requireAllowlistAllowFrom,
-// addAllowAlsoAllowConflictIssue, normalizeTelegramStreamingConfig,
-// normalizeDiscordStreamingConfig, normalizeSlackStreamingConfig,
-// validateTelegramCustomCommands, isSafeScpRemoteHost, isValidInboundPathRootPattern,
-// isSafeRelativeModulePath, enforceOpenDmPolicyAllowFromStar,
-// enforceAllowlistDmPolicyAllowFrom, refineIrcAllowFromAndNickserv
-// are all defined within the schema code block (10343-14038), no need to stub them.
-`;
-
-// 2. Extract the schema code block (lines 10343 to 14038)
-let schemaCode = getLines(10343, 14038);
-
-// 3. Strip ALL .superRefine(...) calls
-// These are complex - they can span many lines with nested parens
-// We need a balanced-paren stripper
-function stripSuperRefine(code) {
-  let result = "";
-  let i = 0;
-  while (i < code.length) {
-    // Look for .superRefine(
-    const marker = ".superRefine(";
-    const idx = code.indexOf(marker, i);
-    if (idx === -1) {
-      result += code.slice(i);
-      break;
-    }
-    // Include everything before .superRefine
-    result += code.slice(i, idx);
-
-    // Now skip from the opening paren to the matching close paren
-    let parenStart = idx + marker.length - 1; // position of the '('
-    let depth = 1;
-    let j = parenStart + 1;
-    while (j < code.length && depth > 0) {
-      if (code[j] === "(") depth++;
-      else if (code[j] === ")") depth--;
-      // Handle string literals to avoid counting parens inside strings
-      else if (code[j] === '"' || code[j] === "'" || code[j] === "`") {
-        const quote = code[j];
-        j++;
-        while (j < code.length) {
-          if (code[j] === "\\") { j++; } // skip escaped char
-          else if (code[j] === quote) break;
-          j++;
-        }
+    const bin = execSync("which openclaw", { encoding: "utf8" }).trim();
+    const resolved = execSync(`readlink -f "${bin}"`, { encoding: "utf8" }).trim();
+    let dir = dirname(resolved);
+    for (let i = 0; i < 5; i++) {
+      if (existsSync(join(dir, "package.json"))) {
+        const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+        if (pkg.name === "openclaw") return dir;
       }
-      j++;
+      dir = dirname(dir);
     }
-    i = j; // skip past the closing paren
-  }
-  return result;
+  } catch { /* ignore */ }
+  console.error("ERROR: Could not find OpenClaw. Use --openclaw-dir or set OPENCLAW_DIR.");
+  process.exit(1);
 }
 
-schemaCode = stripSuperRefine(schemaCode);
+const OPENCLAW_DIR = findOpenClawDir();
+let ocVersion = "unknown";
+try {
+  ocVersion = JSON.parse(readFileSync(join(OPENCLAW_DIR, "package.json"), "utf8")).version || "unknown";
+} catch { /* ignore */ }
 
-// Also strip .transform() calls (same balanced-paren approach)
-function stripMethod(code, methodName) {
+console.log(`OpenClaw dir: ${OPENCLAW_DIR}`);
+console.log(`OpenClaw version: ${ocVersion}`);
+console.log(`Git ref: ${opts.ref}`);
+
+// ── Files to download ──────────────────────────────────────────────────────
+
+// Schema files (src/config/)
+const SCHEMA_FILES = [
+  "zod-schema.ts",
+  "zod-schema.core.ts",
+  "zod-schema.agents.ts",
+  "zod-schema.agent-runtime.ts",
+  "zod-schema.agent-defaults.ts",
+  "zod-schema.agent-model.ts",
+  "zod-schema.allowdeny.ts",
+  "zod-schema.approvals.ts",
+  "zod-schema.channels.ts",
+  "zod-schema.hooks.ts",
+  "zod-schema.installs.ts",
+  "zod-schema.providers.ts",
+  "zod-schema.providers-core.ts",
+  "zod-schema.providers-whatsapp.ts",
+  "zod-schema.secret-input-validation.ts",
+  "zod-schema.sensitive.ts",
+  "zod-schema.session.ts",
+];
+
+// Utility dependencies (need stubs or actual files)
+const UTIL_FILES = [
+  { src: "src/config/types.secrets.ts", dest: "config/types.secrets.ts" },
+  { src: "src/config/types.models.ts", dest: "config/types.models.ts" },
+  { src: "src/config/byte-size.ts", dest: "config/byte-size.ts" },
+  { src: "src/config/discord-preview-streaming.ts", dest: "config/discord-preview-streaming.ts" },
+  { src: "src/config/telegram-custom-commands.ts", dest: "config/telegram-custom-commands.ts" },
+  { src: "src/cli/parse-bytes.ts", dest: "cli/parse-bytes.ts" },
+  { src: "src/cli/parse-duration.ts", dest: "cli/parse-duration.ts" },
+  { src: "src/infra/exec-safety.ts", dest: "infra/exec-safety.ts" },
+  { src: "src/infra/scp-host.ts", dest: "infra/scp-host.ts" },
+  { src: "src/secrets/ref-contract.ts", dest: "secrets/ref-contract.ts" },
+  { src: "src/agents/sandbox/network-mode.ts", dest: "agents/sandbox/network-mode.ts" },
+  { src: "src/media/inbound-path-policy.ts", dest: "media/inbound-path-policy.ts" },
+];
+
+// ── Download from GitHub ───────────────────────────────────────────────────
+
+const WORK_DIR = join(tmpdir(), `openclaw-schema-extract-${Date.now()}`);
+mkdirSync(join(WORK_DIR, "config"), { recursive: true });
+mkdirSync(join(WORK_DIR, "cli"), { recursive: true });
+mkdirSync(join(WORK_DIR, "infra"), { recursive: true });
+mkdirSync(join(WORK_DIR, "agents/sandbox"), { recursive: true });
+mkdirSync(join(WORK_DIR, "media"), { recursive: true });
+mkdirSync(join(WORK_DIR, "secrets"), { recursive: true });
+
+console.log(`\nWork dir: ${WORK_DIR}`);
+console.log("Downloading source files...");
+
+function downloadFile(repoPath, localPath) {
+  const fullLocal = join(WORK_DIR, localPath);
+  try {
+    const content = execSync(
+      `gh api "repos/openclaw/openclaw/contents/${repoPath}?ref=${opts.ref}" -H "Accept: application/vnd.github.raw+json"`,
+      { encoding: "utf8", maxBuffer: 1024 * 1024 }
+    );
+    writeFileSync(fullLocal, content);
+    return true;
+  } catch (e) {
+    console.warn(`  WARN: Could not download ${repoPath}: ${e.message?.split("\n")[0]}`);
+    return false;
+  }
+}
+
+// Download schema files
+let downloaded = 0;
+for (const f of SCHEMA_FILES) {
+  if (downloadFile(`src/config/${f}`, `config/${f}`)) downloaded++;
+}
+console.log(`  Schema files: ${downloaded}/${SCHEMA_FILES.length}`);
+
+// Download utility files
+let utilDownloaded = 0;
+for (const { src, dest } of UTIL_FILES) {
+  if (downloadFile(src, dest)) utilDownloaded++;
+}
+console.log(`  Utility files: ${utilDownloaded}/${UTIL_FILES.length}`);
+
+// ── Post-process: strip superRefine and transform ──────────────────────────
+
+function stripBalancedCall(code, methodName) {
   let result = "";
   let i = 0;
   const marker = "." + methodName + "(";
   while (i < code.length) {
     const idx = code.indexOf(marker, i);
-    if (idx === -1) {
-      result += code.slice(i);
-      break;
-    }
+    if (idx === -1) { result += code.slice(i); break; }
     result += code.slice(i, idx);
-    let parenStart = idx + marker.length - 1;
     let depth = 1;
-    let j = parenStart + 1;
+    let j = idx + marker.length;
     while (j < code.length && depth > 0) {
-      if (code[j] === "(") depth++;
-      else if (code[j] === ")") depth--;
-      else if (code[j] === '"' || code[j] === "'" || code[j] === "`") {
-        const quote = code[j];
-        j++;
+      const ch = code[j];
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      else if (ch === '"' || ch === "'" || ch === "`") {
+        const q = ch; j++;
         while (j < code.length) {
-          if (code[j] === "\\") { j++; }
-          else if (code[j] === quote) break;
+          if (code[j] === "\\") j++;
+          else if (code[j] === q) break;
           j++;
         }
       }
@@ -231,84 +205,170 @@ function stripMethod(code, methodName) {
   return result;
 }
 
-schemaCode = stripMethod(schemaCode, "transform");
-
-// 4. Remove the trailing `.strict()` that was before `.superRefine()` on the root OpenClawSchema
-// The root schema ends with `}).strict()` now (since we stripped superRefine)
-// We need to ensure it ends properly
-
-// 5. Strip import.meta references (shouldn't be in this block but just in case)
-schemaCode = schemaCode.replace(/import\.meta\.[^\s;,)]+/g, "undefined");
-
-// 6. Handle the `sensitive` registry - z.registry() and .register(sensitive)
-// .register(sensitive) returns the schema itself, so it's a no-op for structure purposes
-// But z.registry() might not exist in the bundled zod. Let's handle it.
-
-// Build the final evaluation code
-const fullCode = `
-${utilityCode}
-
-// --- Schema definitions ---
-${schemaCode}
-
-// Export the main schema
-return OpenClawSchema;
-`;
-
-// Load zod
-const { createRequire } = await import("node:module");
-const require = createRequire(import.meta.url);
-const z = require(`${OPENCLAW_DIR}/node_modules/zod`);
-
-// Check if z.registry exists
-if (typeof z.registry !== "function") {
-  console.log("Note: z.registry not found, will monkey-patch it");
+// Strip superRefine and transform from all schema files
+for (const f of SCHEMA_FILES) {
+  const fp = join(WORK_DIR, "config", f);
+  if (!existsSync(fp)) continue;
+  let code = readFileSync(fp, "utf8");
+  code = stripBalancedCall(code, "superRefine");
+  code = stripBalancedCall(code, "transform");
+  writeFileSync(fp, code);
 }
 
-// Create the function and execute it
+// ── Create stub files for missing dependencies ─────────────────────────────
+
+// Some utility files may import things we don't have. Create minimal stubs
+// for any that failed to download.
+for (const { dest } of UTIL_FILES) {
+  const fp = join(WORK_DIR, dest);
+  if (!existsSync(fp)) {
+    // Write a stub that exports empty objects/functions
+    console.warn(`  Creating stub for missing: ${dest}`);
+    writeFileSync(fp, `// Auto-generated stub\nexport default {};\n`);
+  }
+}
+
+// ── Fix import paths ───────────────────────────────────────────────────────
+
+// The schema files use .js extensions in imports but we have .ts files
+// tsx handles this automatically, but we need to ensure paths resolve correctly
+
+// ── Generate harness ───────────────────────────────────────────────────────
+
+const harnessCode = `
+import { OpenClawSchema } from "./config/zod-schema.js";
+import { writeFileSync } from "node:fs";
+
+const OUTPUT = ${JSON.stringify(OUTPUT_FILE)};
+const OC_VERSION = ${JSON.stringify(ocVersion)};
+
 try {
-  const factory = new Function("z", fullCode);
-  const OpenClawSchema = factory(z);
-
-  console.log("Schema extracted successfully!");
-  console.log("Type:", OpenClawSchema?._def?.typeName || OpenClawSchema?.constructor?.name);
-
-  // Convert to JSON Schema using Zod v4's built-in toJSONSchema
   let jsonSchema;
   try {
     jsonSchema = OpenClawSchema.toJSONSchema({ target: "draft-2020-12" });
-  } catch (e) {
-    console.error("toJSONSchema failed:", e.message);
-    // Try without options
+  } catch {
     jsonSchema = OpenClawSchema.toJSONSchema({});
   }
 
-  // Add metadata
   jsonSchema.title = "OpenClaw Configuration";
-  jsonSchema.description = "JSON Schema for openclaw.json configuration file";
+  jsonSchema.description = "JSON Schema for openclaw.json — extracted from OpenClaw v" + OC_VERSION;
 
   const output = JSON.stringify(jsonSchema, null, 2);
-  writeFileSync(OUTPUT_FILE, output);
+  writeFileSync(OUTPUT, output);
 
-  // Count top-level properties
-  const topProps = jsonSchema.properties
-    ? Object.keys(jsonSchema.properties)
-    : [];
+  const topProps = jsonSchema.properties ? Object.keys(jsonSchema.properties) : [];
+  const sizeKB = (Buffer.byteLength(output) / 1024).toFixed(1);
 
-  console.log(`\nOutput: ${OUTPUT_FILE}`);
-  console.log(`File size: ${(Buffer.byteLength(output) / 1024).toFixed(1)} KB`);
-  console.log(`Top-level properties (${topProps.length}): ${topProps.join(", ")}`);
+  console.log("Schema extracted successfully!");
+  console.log("Output: " + OUTPUT);
+  console.log("File size: " + sizeKB + " KB");
+  console.log("Top-level properties (" + topProps.length + "): " + topProps.join(", "));
+
+  // Output property count as machine-readable for diffing
+  console.log("__PROPS_COUNT__:" + topProps.length);
 } catch (err) {
   console.error("Extraction failed:", err.message);
-  // Try to find the error location
-  if (err.message.includes("Unexpected")) {
-    const match = err.message.match(/position (\d+)/);
-    if (match) {
-      const pos = parseInt(match[1]);
-      const context = fullCode.slice(Math.max(0, pos - 100), pos + 100);
-      console.error("\nCode around error position:\n", context);
-    }
-  }
-  console.error("\nStack:", err.stack?.split("\n").slice(0, 5).join("\n"));
+  if (err.stack) console.error(err.stack.split("\\n").slice(0, 8).join("\\n"));
   process.exit(1);
 }
+`;
+
+writeFileSync(join(WORK_DIR, "harness.ts"), harnessCode);
+
+// ── Run extraction via tsx ─────────────────────────────────────────────────
+
+console.log("\nRunning extraction via tsx...");
+
+// tsx needs to find zod — use NODE_PATH to point to OpenClaw's node_modules
+const zodPath = join(OPENCLAW_DIR, "node_modules");
+const env = { ...process.env, NODE_PATH: zodPath };
+
+try {
+  const result = execSync(`npx tsx "${join(WORK_DIR, "harness.ts")}"`, {
+    encoding: "utf8",
+    env,
+    cwd: WORK_DIR,
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 60000,
+  });
+  console.log(result);
+} catch (err) {
+  console.error("\nExtraction FAILED.");
+  if (err.stderr) console.error(err.stderr.slice(0, 2000));
+  if (err.stdout) console.log(err.stdout.slice(0, 1000));
+  console.error("\nThis may mean the source structure has changed.");
+  console.error("Check the downloaded files in:", WORK_DIR);
+  if (!opts.keepTmp) {
+    console.error("(Re-run with --keep-tmp to preserve temp files for debugging)");
+  }
+  if (!opts.keepTmp) rmSync(WORK_DIR, { recursive: true, force: true });
+  process.exit(1);
+}
+
+// ── Diff against previous schema ───────────────────────────────────────────
+
+if (opts.diff && existsSync(opts.diff) && existsSync(OUTPUT_FILE)) {
+  console.log(`\n--- Schema diff vs ${opts.diff} ---`);
+  try {
+    const oldSchema = JSON.parse(readFileSync(opts.diff, "utf8"));
+    const newSchema = JSON.parse(readFileSync(OUTPUT_FILE, "utf8"));
+
+    const oldProps = new Set(Object.keys(oldSchema.properties || {}));
+    const newProps = new Set(Object.keys(newSchema.properties || {}));
+    const added = [...newProps].filter(p => !oldProps.has(p));
+    const removed = [...oldProps].filter(p => !newProps.has(p));
+
+    if (added.length) console.log(`  ADDED top-level: ${added.join(", ")}`);
+    if (removed.length) console.log(`  REMOVED top-level: ${removed.join(", ")}`);
+    if (!added.length && !removed.length) console.log("  No top-level property changes.");
+
+    // Deep path count
+    function countPaths(obj, prefix = "") {
+      const paths = new Set();
+      if (!obj || typeof obj !== "object") return paths;
+      if (obj.properties) {
+        for (const [k, v] of Object.entries(obj.properties)) {
+          const p = prefix ? `${prefix}.${k}` : k;
+          paths.add(p);
+          for (const n of countPaths(v, p)) paths.add(n);
+        }
+      }
+      if (obj.items) for (const n of countPaths(obj.items, `${prefix}[]`)) paths.add(n);
+      if (obj.additionalProperties && typeof obj.additionalProperties === "object") {
+        for (const n of countPaths(obj.additionalProperties, `${prefix}[*]`)) paths.add(n);
+      }
+      return paths;
+    }
+
+    const oldPaths = countPaths(oldSchema);
+    const newPaths = countPaths(newSchema);
+    const addedPaths = [...newPaths].filter(p => !oldPaths.has(p));
+    const removedPaths = [...oldPaths].filter(p => !newPaths.has(p));
+    const delta = newPaths.size - oldPaths.size;
+
+    console.log(`  Total schema paths: ${oldPaths.size} → ${newPaths.size} (${delta >= 0 ? "+" : ""}${delta})`);
+
+    if (addedPaths.length > 0 && addedPaths.length <= 30) {
+      for (const p of addedPaths) console.log(`    + ${p}`);
+    } else if (addedPaths.length > 30) {
+      console.log(`    ${addedPaths.length} paths added`);
+    }
+    if (removedPaths.length > 0 && removedPaths.length <= 30) {
+      for (const p of removedPaths) console.log(`    - ${p}`);
+    } else if (removedPaths.length > 30) {
+      console.log(`    ${removedPaths.length} paths removed`);
+    }
+  } catch (e) {
+    console.warn(`  Diff failed: ${e.message}`);
+  }
+}
+
+// ── Cleanup ────────────────────────────────────────────────────────────────
+
+if (!opts.keepTmp) {
+  rmSync(WORK_DIR, { recursive: true, force: true });
+} else {
+  console.log(`\nTemp files preserved at: ${WORK_DIR}`);
+}
+
+console.log("\nDone.");
