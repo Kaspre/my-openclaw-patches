@@ -16,6 +16,7 @@ Patches are applied in dependency order:
   8. ui-message-vanish       — dashboard user message persistence
   9. loglevel-fix            — inverted levelToMinLevel mapping
  10. plugin-cache-global     — process-global plugin registry cache
+ 11. sessions-manage-tool    — programmatic session compact/reset
 """
 
 import argparse
@@ -36,6 +37,7 @@ PATCHES = [
     ("ui-message-vanish", "apply-ui-message-vanish-fix.py"),
     ("loglevel-fix", "apply-loglevel-fix.py"),
     ("plugin-cache-global", "apply-plugin-cache-global.py"),
+    ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
 ]
 
 
