@@ -76,6 +76,9 @@ function createSessionsManageTool(opts) {
 \t\t\t});
 \t\t\tconst access = visibilityGuard.check(resolvedKey);
 \t\t\tif (!access.allowed) return jsonResult({ status: access.status, error: access.error, sessionKey: displayKey });
+\t\t\tif (action === "reset" && resolvedKey === effectiveRequesterKey) {
+\t\t\t\treturn jsonResult({ status: "error", action, sessionKey: displayKey, error: "Cannot reset own active session — use /new or target from another session" });
+\t\t\t}
 \t\t\tif (action === "compact") {
 \t\t\t\ttry {
 \t\t\t\t\tconst result = await callGateway({ method: "sessions.compact", params: { key: resolvedKey } });
