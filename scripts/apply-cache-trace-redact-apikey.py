@@ -40,6 +40,8 @@ def find_files(dist_dir):
     for js_file in sorted(glob.glob(os.path.join(dist_dir, "**", "*.js"), recursive=True)):
         if ".bak-" in js_file or ".bak." in js_file:
             continue
+        if not os.path.isfile(js_file):
+            continue
         with open(js_file, "r") as f:
             content = f.read()
         if OLD in content:

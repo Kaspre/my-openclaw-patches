@@ -13,11 +13,9 @@ Patches are applied in dependency order:
   5. heartbeat-sessionkey    — exec notification delivery (Changes 2-5)
   6. memoryflush-fix         — flush fires every compaction
   7. session-key-cli         — --session-key flag for openclaw agent
-  8. ui-message-vanish       — dashboard user message persistence
-  9. loglevel-fix            — inverted levelToMinLevel mapping
- 10. plugin-cache-global     — process-global plugin registry cache
- 11. sessions-manage-tool    — programmatic session compact/reset
- 12. cache-trace-redact      — redact API keys from cache-trace logs
+  8. loglevel-fix            — inverted levelToMinLevel mapping
+  9. sessions-manage-tool    — programmatic session compact/reset
+ 10. cache-trace-redact      — redact API keys from cache-trace logs
 """
 
 import argparse
@@ -35,9 +33,7 @@ PATCHES = [
     ("heartbeat-sessionkey", "apply-heartbeat-sessionkey-fix.py"),
     ("memoryflush-fix", "apply-memoryflush-fix.py"),
     ("session-key-cli", "apply-session-key-cli.py"),
-    ("ui-message-vanish", "apply-ui-message-vanish-fix.py"),
     ("loglevel-fix", "apply-loglevel-fix.py"),
-    ("plugin-cache-global", "apply-plugin-cache-global.py"),
     ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
     ("cache-trace-redact", "apply-cache-trace-redact-apikey.py"),
 ]

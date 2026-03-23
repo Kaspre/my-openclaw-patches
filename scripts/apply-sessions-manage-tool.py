@@ -156,40 +156,9 @@ REPLACEMENTS = [
         "\t\t}),",
     ),
 
-    # 3. Sandbox constants: add sessions_manage to DEFAULT_TOOL_ALLOW
-    (
-        "add sessions_manage to sandbox constants",
-        '\t"sessions_send",\n\t"sessions_spawn",\n\t"sessions_yield",',
-        '\t"sessions_manage",\n\t"sessions_send",\n\t"sessions_spawn",\n\t"sessions_yield",',
-    ),
+    # 3. Sandbox constants: MOVED to EXTRACTED_REPLACEMENTS (now in docker-*.js)
 
-    # 4. Tool catalog: add sessions_manage entry after sessions_send
-    (
-        "add sessions_manage to tool catalog",
-        '\tid: "sessions_send",\n'
-        '\t\tlabel: "sessions_send",\n'
-        '\t\tdescription: "Send to session",\n'
-        '\t\tsectionId: "sessions",\n'
-        '\t\tprofiles: ["coding", "messaging"],\n'
-        '\t\tincludeInOpenClawGroup: true\n'
-        '\t},',
-
-        '\tid: "sessions_send",\n'
-        '\t\tlabel: "sessions_send",\n'
-        '\t\tdescription: "Send to session",\n'
-        '\t\tsectionId: "sessions",\n'
-        '\t\tprofiles: ["coding", "messaging"],\n'
-        '\t\tincludeInOpenClawGroup: true\n'
-        '\t},\n'
-        '\t{\n'
-        '\t\tid: "sessions_manage",\n'
-        '\t\tlabel: "sessions_manage",\n'
-        '\t\tdescription: "Compact/reset session",\n'
-        '\t\tsectionId: "sessions",\n'
-        '\t\tprofiles: ["coding", "messaging"],\n'
-        '\t\tincludeInOpenClawGroup: true\n'
-        '\t},',
-    ),
+    # 4. Tool catalog: MOVED to EXTRACTED_REPLACEMENTS (now in tool-catalog-*.js)
 
     # 5. System prompt descriptions: add sessions_manage after sessions_send
     (
@@ -235,11 +204,54 @@ REPLACEMENTS = [
         '\t\tcase "sessions_send":\n\t\tcase "sessions_manage": return true;',
     ),
 
-    # 11. METHOD_SCOPE_GROUPS: add sessions.compactSemantic to ADMIN_SCOPE group
-    #     Required for both client-side scope request (callGatewayLeastPrivilege)
-    #     and server-side authorization (authorizeOperatorScopesForMethod)
+    # 11. METHOD_SCOPE_GROUPS: MOVED to EXTRACTED_REPLACEMENTS (now in method-scopes-*.js)
+]
+
+# === Replacements for files extracted from pi-embedded in v2026.3.22 ===
+# These patterns used to be in pi-embedded but are now in dedicated chunk files.
+# Each entry: (description, file_glob, old_string, new_string)
+EXTRACTED_REPLACEMENTS = [
+    # 3. Sandbox constants: DEFAULT_TOOL_ALLOW (now in docker-*.js)
+    (
+        "add sessions_manage to sandbox constants",
+        "docker-*.js",
+        '\t"sessions_send",\n\t"sessions_spawn",\n\t"sessions_yield",',
+        '\t"sessions_manage",\n\t"sessions_send",\n\t"sessions_spawn",\n\t"sessions_yield",',
+    ),
+
+    # 4. Tool catalog: CORE_TOOL_DEFINITIONS (now in tool-catalog-*.js)
+    (
+        "add sessions_manage to tool catalog",
+        "tool-catalog-*.js",
+        '\tid: "sessions_send",\n'
+        '\t\tlabel: "sessions_send",\n'
+        '\t\tdescription: "Send to session",\n'
+        '\t\tsectionId: "sessions",\n'
+        '\t\tprofiles: ["coding", "messaging"],\n'
+        '\t\tincludeInOpenClawGroup: true\n'
+        '\t},',
+
+        '\tid: "sessions_send",\n'
+        '\t\tlabel: "sessions_send",\n'
+        '\t\tdescription: "Send to session",\n'
+        '\t\tsectionId: "sessions",\n'
+        '\t\tprofiles: ["coding", "messaging"],\n'
+        '\t\tincludeInOpenClawGroup: true\n'
+        '\t},\n'
+        '\t{\n'
+        '\t\tid: "sessions_manage",\n'
+        '\t\tlabel: "sessions_manage",\n'
+        '\t\tdescription: "Compact/reset session",\n'
+        '\t\tsectionId: "sessions",\n'
+        '\t\tprofiles: ["coding", "messaging"],\n'
+        '\t\tincludeInOpenClawGroup: true\n'
+        '\t},',
+    ),
+
+    # 11. METHOD_SCOPE_GROUPS ADMIN_SCOPE (now in method-scopes-*.js)
     (
         "add sessions.compactSemantic to METHOD_SCOPE_GROUPS ADMIN_SCOPE",
+        "method-scopes-*.js",
         '\t\t"sessions.compact",',
         '\t\t"sessions.compact",\n\t\t"sessions.compactSemantic",',
     ),
@@ -341,11 +353,11 @@ GATEWAY_REPLACEMENTS = [
     ),
 
     # 2. Inject sessions.compactSemantic handler after sessions.compact handler
-    #    The compact handler ends with:  \t}\n};\n//#endregion
+    #    v2026.3.22 added emitSessionsChanged() after respond() in the compact handler.
     #    We insert the new handler before the closing };
     (
         "inject sessions.compactSemantic RPC handler",
-        # Match the last few lines of sessions.compact handler + closing brace
+        # Match the last lines of sessions.compact handler including emitSessionsChanged
         '\t\trespond(true, {\n'
         '\t\t\tok: true,\n'
         '\t\t\tkey: target.canonicalKey,\n'
@@ -353,6 +365,11 @@ GATEWAY_REPLACEMENTS = [
         '\t\t\tarchived,\n'
         '\t\t\tkept: keptLines.length\n'
         '\t\t}, void 0);\n'
+        '\t\temitSessionsChanged(context, {\n'
+        '\t\t\tsessionKey: target.canonicalKey,\n'
+        '\t\t\treason: "compact",\n'
+        '\t\t\tcompacted: true\n'
+        '\t\t});\n'
         '\t}\n'
         '};\n'
         '//#endregion',
@@ -364,6 +381,11 @@ GATEWAY_REPLACEMENTS = [
         '\t\t\tarchived,\n'
         '\t\t\tkept: keptLines.length\n'
         '\t\t}, void 0);\n'
+        '\t\temitSessionsChanged(context, {\n'
+        '\t\t\tsessionKey: target.canonicalKey,\n'
+        '\t\t\treason: "compact",\n'
+        '\t\t\tcompacted: true\n'
+        '\t\t});\n'
         '\t}' + GATEWAY_COMPACT_SEMANTIC_HANDLER + '\n'
         '};\n'
         '//#endregion',
@@ -480,16 +502,31 @@ def find_gateway_cli_files(dist_dir):
     return files
 
 
-def find_auth_profiles_files(dist_dir):
-    """Find auth-profiles files containing the embedded run finally block."""
+def find_extracted_file(dist_dir, file_glob):
+    """Find a single extracted chunk file by glob pattern."""
     files = []
-    for js_file in sorted(glob.glob(os.path.join(dist_dir, "auth-profiles-*.js"))):
+    for js_file in sorted(glob.glob(os.path.join(dist_dir, file_glob))):
         if ".bak-" in js_file or ".bak." in js_file:
             continue
-        with open(js_file, "r") as f:
-            content = f.read()
-        if "clearActiveEmbeddedRun" in content and "compactEmbeddedPiSessionDirect" in content:
-            files.append(js_file)
+        files.append(js_file)
+    return files
+
+
+def find_auth_profiles_files(dist_dir):
+    """Find files containing the embedded run finally block.
+    In v2026.3.13 this was auth-profiles-*.js, in v2026.3.22 it moved to pi-embedded."""
+    files = []
+    # Search auth-profiles first (v2026.3.13), then pi-embedded (v2026.3.22)
+    for pattern in ["auth-profiles-*.js", "pi-embedded-*.js"]:
+        for js_file in sorted(glob.glob(os.path.join(dist_dir, pattern))):
+            if ".bak-" in js_file or ".bak." in js_file:
+                continue
+            with open(js_file, "r") as f:
+                content = f.read()
+            if "clearActiveEmbeddedRun" in content and "compactEmbeddedPiSessionDirect" in content:
+                files.append(js_file)
+        if files:
+            break  # Found in first pattern, don't search second
     return files
 
 
@@ -598,21 +635,31 @@ def main():
         patch_file(chunk, all_replacements, dry_run=args.dry_run)
     print()
 
-    # 2. Patch dangerous-tools files
+    # 2. Patch extracted chunk files (split out from pi-embedded in v2026.3.22)
+    for desc, file_glob, old, new in EXTRACTED_REPLACEMENTS:
+        targets = find_extracted_file(dist_dir, file_glob)
+        if not targets:
+            # Fall back to pi-embedded (pre-v2026.3.22 layout)
+            targets = chunks
+        for target_file in targets:
+            patch_file(target_file, [(desc, old, new)], dry_run=args.dry_run, skip_already_check=True)
+    print()
+
+    # 3. Patch dangerous-tools files
     dangerous = find_dangerous_tools_files(dist_dir)
     print(f"Found {len(dangerous)} dangerous-tools files:")
     for dt_file in dangerous:
         patch_file(dt_file, DANGEROUS_TOOLS_REPLACEMENTS, dry_run=args.dry_run)
     print()
 
-    # 3. Patch gateway-cli files (sessions.compactSemantic RPC handler)
+    # 4. Patch gateway-cli files (sessions.compactSemantic RPC handler)
     gateways = find_gateway_cli_files(dist_dir)
     print(f"Found {len(gateways)} gateway-cli files:")
     for gw_file in gateways:
         patch_file(gw_file, GATEWAY_REPLACEMENTS, dry_run=args.dry_run, skip_already_check=True)
     print()
 
-    # 4. Patch auth-profiles files (post-run deferred compaction handler)
+    # 5. Patch auth-profiles files (post-run deferred compaction handler)
     auth_files = find_auth_profiles_files(dist_dir)
     print(f"Found {len(auth_files)} auth-profiles files:")
     for auth_file in auth_files:

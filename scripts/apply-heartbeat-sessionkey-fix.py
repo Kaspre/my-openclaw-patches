@@ -121,7 +121,7 @@ CHANGES = [
         "old": CHANGE3_OLD,
         "new": CHANGE3_NEW,
         "marker": CHANGE3_ALREADY_PATCHED,
-        "globs": ["health-*.js"],
+        "globs": ["health-*.js", "gateway-cli-*.js"],
     },
     {
         "name": "Change 4: exec: prefix in resolveHeartbeatReasonKind",
@@ -135,7 +135,7 @@ CHANGES = [
         "old": CHANGE5_OLD,
         "new": CHANGE5_NEW,
         "marker": CHANGE5_ALREADY_PATCHED,
-        "globs": ["health-*.js"],
+        "globs": ["health-*.js", "gateway-cli-*.js"],
     },
 ]
 

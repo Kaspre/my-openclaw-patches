@@ -15,7 +15,7 @@ python3 scripts/apply-all.py
 systemctl --user restart openclaw-gateway
 ```
 
-## Current Patches (v2026.3.13)
+## Current Patches (v2026.3.22)
 
 | # | Script | Issue | Files | Description |
 |---|--------|-------|-------|-------------|
@@ -26,12 +26,16 @@ systemctl --user restart openclaw-gateway
 | 5 | `apply-heartbeat-sessionkey-fix.py` | #14191 / PR #21682 | ~16 | Fix exec notification delivery (Changes 2-5) |
 | 6 | `apply-memoryflush-fix.py` | #12590 | 1 | Fix flush skipping every other compaction |
 | 7 | `apply-session-key-cli.py` | PR #35241 | 2 | Add `--session-key` flag to `openclaw agent` |
-| 8 | `apply-ui-message-vanish-fix.py` | #14928 / #9183 | 1 | Fix user messages vanishing in dashboard |
-| 9 | `ws-handshake-timeout.sh` | #44718 / PRs #44784 #44849 | 29 | Increase WS handshake timeouts (server 3s→15s, client 2s→10s) |
-| 10 | `apply-loglevel-fix.py` | #29448 / PR #44646 | 9 | Fix inverted levelToMinLevel mapping (debug logging broken) |
-| 11 | `apply-plugin-cache-global.py` | #47429 / #48380 | 7 | Process-global plugin registry cache (fixes cross-chunk duplicate activation) |
-| 12 | `apply-sessions-manage-tool.py` | #10981 / PR #52422 | 12 | Add `sessions_manage` tool with semantic compaction (`compactSemantic`), gateway RPC, post-run deferred execution, post-compact nudge, scope registration |
-| 13 | `apply-cache-trace-redact-apikey.py` | #53103 | 7 | Redact API keys/tokens/passwords from cache-trace diagnostic logs |
+| 8 | `ws-handshake-timeout.sh` | #44718 / PRs #44784 #44849 | 29 | Increase WS handshake timeouts (server 3s→15s, client 2s→10s) |
+| 9 | `apply-loglevel-fix.py` | #29448 / PR #44646 | 9 | Fix inverted levelToMinLevel mapping (debug logging broken) |
+| 10 | `apply-sessions-manage-tool.py` | #10981 / PR #52422 | 17 | Add `sessions_manage` tool with semantic compaction (`compactSemantic`), gateway RPC, post-run deferred execution, post-compact nudge, scope registration |
+| 11 | `apply-cache-trace-redact-apikey.py` | #53103 | 7 | Redact API keys/tokens/passwords from cache-trace diagnostic logs |
+
+### Retired Patches
+| Script | Reason |
+|--------|--------|
+| `apply-ui-message-vanish-fix.py` | Fixed upstream in v2026.3.13 |
+| `apply-plugin-cache-global.py` | Fixed upstream in v2026.3.22 (bundle refactor eliminated duplicate plugin registries) |
 
 ## Usage
 
