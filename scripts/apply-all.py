@@ -17,6 +17,7 @@ Patches are applied in dependency order:
   9. loglevel-fix            — inverted levelToMinLevel mapping
  10. plugin-cache-global     — process-global plugin registry cache
  11. sessions-manage-tool    — programmatic session compact/reset
+ 12. cache-trace-redact      — redact API keys from cache-trace logs
 """
 
 import argparse
@@ -38,6 +39,7 @@ PATCHES = [
     ("loglevel-fix", "apply-loglevel-fix.py"),
     ("plugin-cache-global", "apply-plugin-cache-global.py"),
     ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
+    ("cache-trace-redact", "apply-cache-trace-redact-apikey.py"),
 ]
 
 
