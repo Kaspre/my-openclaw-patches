@@ -30,7 +30,7 @@ systemctl --user restart openclaw-gateway
 | 9 | `ws-handshake-timeout.sh` | #44718 / PRs #44784 #44849 | 29 | Increase WS handshake timeouts (server 3s→15s, client 2s→10s) |
 | 10 | `apply-loglevel-fix.py` | #29448 / PR #44646 | 9 | Fix inverted levelToMinLevel mapping (debug logging broken) |
 | 11 | `apply-plugin-cache-global.py` | #47429 / #48380 | 7 | Process-global plugin registry cache (fixes cross-chunk duplicate activation) |
-| 12 | `apply-sessions-manage-tool.py` | #10981 / PR #51415 | 8 | Add `sessions_manage` tool for programmatic session compact/reset |
+| 12 | `apply-sessions-manage-tool.py` | #10981 / PR #52422 | 8 | Add `sessions_manage` tool for programmatic session compact/reset with self-compact procedure |
 
 ## Usage
 

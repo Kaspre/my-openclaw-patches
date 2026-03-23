@@ -33,12 +33,18 @@ function createSessionsManageTool(opts) {
 \treturn {
 \t\tlabel: "Session Manage",
 \t\tname: "sessions_manage",
-\t\tdescription: "Compact or reset a session by key. Use action 'compact' to compress context or 'reset' to start fresh.",
+\t\tdescription: "Compact or reset a session by key. Use 'compact' to trim context or 'reset' to start fresh. Works on self-session (sessionKey: 'main'). " +
+\t\t\t"SELF-COMPACT PROCEDURE: (1) Write checkpoint to memory/YYYY-MM-DD.md with '## Self-Compact Checkpoint (HH:MM)' heading — include current task, findings, next steps, and concrete file/line references. " +
+\t\t\t"(2) Write memory/.compaction-pending marker: {\\\"timestamp\\\":\\\"<ISO>\\\",\\\"sessionKey\\\":\\\"<key>\\\",\\\"messageCount\\\":-1,\\\"tokenCount\\\":\\\"self-compact\\\",\\\"toolCallsSinceCheckpoint\\\":0,\\\"trigger\\\":\\\"self-compact\\\"}. " +
+\t\t\t"(3) Append breadcrumb to memory/.breadcrumbs-YYYY-MM-DD.log. " +
+\t\t\t"(4) Call this tool with sessionKey 'main', action 'compact'. " +
+\t\t\t"(5) End your turn — Memory Guardian will auto-inject the checkpoint on the next turn via .compaction-pending detection.",
 \t\tparameters: {
 \t\t\ttype: "object",
 \t\t\tproperties: {
 \t\t\t\tsessionKey: { type: "string" },
-\t\t\t\taction: { type: "string", enum: ["compact", "reset"] }
+\t\t\t\taction: { type: "string", enum: ["compact", "reset"] },
+\t\t\t\tinstructions: { type: "string", description: "Optional guidance for compaction focus (reserved for semantic compaction)" }
 \t\t\t},
 \t\t\trequired: ["sessionKey", "action"]
 \t\t},
@@ -46,6 +52,7 @@ function createSessionsManageTool(opts) {
 \t\t\tconst params = args;
 \t\t\tconst sessionKeyParam = typeof params?.sessionKey === "string" ? params.sessionKey.trim() : "";
 \t\t\tconst action = typeof params?.action === "string" ? params.action.trim() : "";
+\t\t\tconst instructions = typeof params?.instructions === "string" ? params.instructions.trim() : "";
 \t\t\tif (!sessionKeyParam) return jsonResult({ status: "error", error: "sessionKey is required" });
 \t\t\tif (!ACTIONS.includes(action)) return jsonResult({ status: "error", error: "action must be 'compact' or 'reset'" });
 \t\t\tconst { cfg, mainKey, alias, effectiveRequesterKey, restrictToSpawned } = resolveSessionToolContext(opts);
@@ -76,9 +83,6 @@ function createSessionsManageTool(opts) {
 \t\t\t});
 \t\t\tconst access = visibilityGuard.check(resolvedKey);
 \t\t\tif (!access.allowed) return jsonResult({ status: access.status, error: access.error, sessionKey: displayKey });
-\t\t\tif (action === "reset" && resolvedKey === effectiveRequesterKey) {
-\t\t\t\treturn jsonResult({ status: "error", action, sessionKey: displayKey, error: "Cannot reset own active session — use /new or target from another session" });
-\t\t\t}
 \t\t\tif (action === "compact") {
 \t\t\t\ttry {
 \t\t\t\t\tconst result = await callGateway({ method: "sessions.compact", params: { key: resolvedKey } });
