@@ -25,7 +25,8 @@ BACKUP_SUFFIX = ".bak-memflush"
 # --- Replacement patterns ---
 
 # 1. Change `const nextCount = await incrementCompactionCount({` to `await incrementCompactionCount({`
-OLD_INCREMENT = """\t\t\tconst nextCount = await incrementCompactionCount({
+# v2026.3.22 pattern (without newSessionId)
+OLD_INCREMENT_V322 = """\t\t\tconst nextCount = await incrementCompactionCount({
 \t\t\t\tsessionEntry: activeSessionEntry,
 \t\t\t\tsessionStore: activeSessionStore,
 \t\t\t\tsessionKey: params.sessionKey,
@@ -33,18 +34,35 @@ OLD_INCREMENT = """\t\t\tconst nextCount = await incrementCompactionCount({
 \t\t\t});
 \t\t\tif (typeof nextCount === "number") memoryFlushCompactionCount = nextCount;"""
 
-NEW_INCREMENT = """\t\t\tawait incrementCompactionCount({
+# v2026.3.24 pattern (with newSessionId)
+OLD_INCREMENT_V324 = """\t\t\tconst nextCount = await incrementCompactionCount({
 \t\t\t\tsessionEntry: activeSessionEntry,
 \t\t\t\tsessionStore: activeSessionStore,
 \t\t\t\tsessionKey: params.sessionKey,
-\t\t\t\tstorePath: params.storePath
-\t\t\t});
-\t\t\t// FIX #12590: Do NOT reassign memoryFlushCompactionCount to post-increment value.
+\t\t\t\tstorePath: params.storePath,
+\t\t\t\tnewSessionId: postCompactionSessionId
+\t\t\t});"""
+
+NEW_INCREMENT_V324 = """\t\t\tawait incrementCompactionCount({
+\t\t\t\tsessionEntry: activeSessionEntry,
+\t\t\t\tsessionStore: activeSessionStore,
+\t\t\t\tsessionKey: params.sessionKey,
+\t\t\t\tstorePath: params.storePath,
+\t\t\t\tnewSessionId: postCompactionSessionId
+\t\t\t});"""
+
+# The reassignment line to remove (same across versions)
+OLD_REASSIGN = """\t\t\tif (typeof nextCount === "number") memoryFlushCompactionCount = nextCount;"""
+
+NEW_REASSIGN = """\t\t\t// FIX #12590: Do NOT reassign memoryFlushCompactionCount to post-increment value.
 \t\t\t// Keep it at pre-increment (N) so next cycle's compactionCount (N+1) won't match,
 \t\t\t// allowing flush to fire on every compaction instead of every other."""
 
 REPLACEMENTS = [
-    ("incrementCompactionCount + counter reassignment removal", OLD_INCREMENT, NEW_INCREMENT),
+    # Try v2026.3.24 pattern first (with newSessionId), then fall back to v2026.3.22
+    ("incrementCompactionCount return capture (v324)", OLD_INCREMENT_V324, NEW_INCREMENT_V324),
+    ("incrementCompactionCount return capture (v322)", OLD_INCREMENT_V322, OLD_INCREMENT_V322.replace("const nextCount = await", "await")),
+    ("counter reassignment removal", OLD_REASSIGN, NEW_REASSIGN),
 ]
 
 
@@ -77,15 +95,21 @@ def apply_patch(filepath, dry_run=False):
         print(f"  SKIP (already patched): {os.path.basename(filepath)}")
         return False
 
+    applied_any = False
     for name, old, new in REPLACEMENTS:
         count = content.count(old)
         if count == 0:
-            print(f"  ERROR: pattern not found for {name} in {os.path.basename(filepath)}")
-            return False
+            continue  # Try next pattern variant
         if count > 1:
             print(f"  ERROR: pattern for {name} found {count} times (expected 1) in {os.path.basename(filepath)}")
             return False
         content = content.replace(old, new)
+        print(f"  Applied: {name}")
+        applied_any = True
+
+    if not applied_any:
+        print(f"  ERROR: no matching patterns found in {os.path.basename(filepath)}")
+        return False
 
     if content == original:
         print(f"  SKIP (no changes): {os.path.basename(filepath)}")
