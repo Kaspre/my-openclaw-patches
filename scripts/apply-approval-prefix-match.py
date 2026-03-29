@@ -18,7 +18,7 @@ import shutil
 import sys
 
 DIST_DIR_DEFAULT = os.path.expanduser(
-    "~/.nvm/versions/node/v25.6.1/lib/node_modules/openclaw/dist"
+    "~/.nvm/versions/node/v25.8.2/lib/node_modules/openclaw/dist"
 )
 
 BACKUP_SUFFIX = ".bak-approval-prefix"
