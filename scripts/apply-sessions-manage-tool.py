@@ -136,23 +136,26 @@ REPLACEMENTS = [
     # 2. Tool registration: add after createSessionsSendTool call
     (
         "register createSessionsManageTool in tool array",
+        # v2026.3.24: config changed from options?.config to resolvedConfig, added callGateway
         "\t\tcreateSessionsSendTool({\n"
         "\t\t\tagentSessionKey: options?.agentSessionKey,\n"
         "\t\t\tagentChannel: options?.agentChannel,\n"
         "\t\t\tsandboxed: options?.sandboxed,\n"
-        "\t\t\tconfig: options?.config\n"
+        "\t\t\tconfig: resolvedConfig,\n"
+        "\t\t\tcallGateway: openClawToolsDeps.callGateway\n"
         "\t\t}),",
 
         "\t\tcreateSessionsSendTool({\n"
         "\t\t\tagentSessionKey: options?.agentSessionKey,\n"
         "\t\t\tagentChannel: options?.agentChannel,\n"
         "\t\t\tsandboxed: options?.sandboxed,\n"
-        "\t\t\tconfig: options?.config\n"
+        "\t\t\tconfig: resolvedConfig,\n"
+        "\t\t\tcallGateway: openClawToolsDeps.callGateway\n"
         "\t\t}),\n"
         "\t\tcreateSessionsManageTool({\n"
         "\t\t\tagentSessionKey: options?.agentSessionKey,\n"
         "\t\t\tsandboxed: options?.sandboxed,\n"
-        "\t\t\tconfig: options?.config\n"
+        "\t\t\tconfig: resolvedConfig\n"
         "\t\t}),",
     ),
 
