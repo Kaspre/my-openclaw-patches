@@ -5,17 +5,22 @@ Apply all OpenClaw patches in the correct order.
 Usage:
   python3 apply-all.py [--dry-run] [--dist-dir PATH]
 
-Patches are applied in dependency order:
-  1. exec-host-override      — exec tool sandbox→gateway override
-  2. approval-auto-expire    — Discord native approval recognition
-  3. approval-prefix-match   — /approve with 8-char slugs
-  4. approval-desc-routing   — approval embeds stay in source channel
-  5. heartbeat-sessionkey    — exec notification delivery (Changes 2-5)
-  6. memoryflush-fix         — flush fires every compaction
-  7. session-key-cli         — --session-key flag for openclaw agent
-  8. loglevel-fix            — inverted levelToMinLevel mapping
-  9. sessions-manage-tool    — programmatic session compact/reset
- 10. cache-trace-redact      — redact API keys from cache-trace logs
+Active patches (v2026.3.31):
+  1. heartbeat-sessionkey    — exec notification delivery (Changes 2+4 of PR #21682)
+  2. memoryflush-fix         — flush fires every compaction (#12590)
+  3. loglevel-fix            — inverted levelToMinLevel mapping (#29448)
+  4. cron-duplicate-fix      — prevent duplicate job execution after restart (#42640)
+
+On hold:
+  4. sessions-manage-tool    — programmatic session compact/reset (PR #52422, apply on demand)
+
+Retired on v2026.3.31:
+  - exec-host-override      — fixed upstream (#57689)
+  - approval-auto-expire    — tabled (OC Firewall handles security)
+  - approval-prefix-match   — tabled (OC Firewall handles security)
+  - approval-desc-routing   — tabled (OC Firewall handles security)
+  - session-key-cli         — superseded by native --session-id (v2026.3.22)
+  - cache-trace-redact      — no unredacted files remain
 """
 
 import argparse
@@ -26,16 +31,12 @@ import sys
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 PATCHES = [
-    ("exec-host-override", "apply-exec-host-override.py"),
-    ("approval-auto-expire", "apply-approval-auto-expire-fix.py"),
-    ("approval-prefix-match", "apply-approval-prefix-match.py"),
-    ("approval-desc-routing", "apply-approval-desc-routing.py"),
     ("heartbeat-sessionkey", "apply-heartbeat-sessionkey-fix.py"),
     ("memoryflush-fix", "apply-memoryflush-fix.py"),
-    ("session-key-cli", "apply-session-key-cli.py"),
     ("loglevel-fix", "apply-loglevel-fix.py"),
-    ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
-    ("cache-trace-redact", "apply-cache-trace-redact-apikey.py"),
+    ("cron-duplicate-fix", "apply-cron-duplicate-fix.py"),
+    # On hold — apply with: --only sessions-manage-tool
+    # ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
 ]
 
 

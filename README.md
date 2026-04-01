@@ -15,32 +15,40 @@ python3 scripts/apply-all.py
 systemctl --user restart openclaw-gateway
 ```
 
-## Current Patches (v2026.3.24)
+## Active Patches (v2026.3.31)
 
 | # | Script | Issue | Files | Description |
 |---|--------|-------|-------|-------------|
-| 1 | `apply-exec-host-override.py` | #11150 / PR #11185 | 1 | Silently override model's `host: "sandbox"` with configured host |
-| 2 | `apply-approval-auto-expire-fix.py` | (no issue) | 1 | Recognize Discord native approvals in `hasExecApprovalClients` |
-| 3 | `apply-approval-prefix-match.py` | #9591 / PR #9641 | 1 | Allow 8-char slugs for `/approve` (TUI/SSH/Telegram) |
-| 4 | `apply-approval-desc-routing.py` | #28753 | 1 | Keep approval embeds in originating channel |
-| 5 | `apply-heartbeat-sessionkey-fix.py` | #14191 / PR #50818 | 3 | Fix exec notification delivery (Changes 2-5) |
-| 6 | `apply-memoryflush-fix.py` | #12590 / PR #51421 | 1 | Fix flush skipping every other compaction |
-| 7 | `apply-session-key-cli.py` | PR #35241 | 1 | Add `--session-key` flag to `openclaw agent` |
-| 8 | `ws-handshake-timeout.sh` | #44718 / PRs #44784 #44849 | 29 | Increase WS handshake timeouts (server 3s→15s, client 2s→10s) |
-| 9 | `apply-sessions-manage-tool.py` | #10981 / PR #52422 | ~8 | Add `sessions_manage` tool with semantic compaction, gateway RPC, deferred execution |
+| 1 | `apply-heartbeat-sessionkey-fix.py` | #14191 / PR #50818 | 2 | Fix exec notification delivery (Changes 2+4 of PR #21682; Changes 3+5 refactored upstream) |
+| 2 | `apply-memoryflush-fix.py` | #12590 / PR #51421 | 1 | Fix flush skipping every other compaction |
+| 3 | `apply-loglevel-fix.py` | #29448 / PR #44646 | 2 | Fix inverted levelToMinLevel mapping |
+| 4 | `apply-cron-duplicate-fix.py` | #42640 / PR #42729 | 1 | Prevent duplicate cron job execution after gateway restart |
+
+### On Hold
+
+| Script | Issue | Description |
+|--------|-------|-------------|
+| `apply-sessions-manage-tool.py` | #10981 / PR #52422 | Add `sessions_manage` tool with semantic compaction. Apply on demand: `python3 scripts/apply-all.py --only sessions-manage-tool` |
 
 ### Retired Patches
-| Script | Reason |
-|--------|--------|
-| `apply-ui-message-vanish-fix.py` | Fixed upstream in v2026.3.13 |
-| `apply-plugin-cache-global.py` | Fixed upstream in v2026.3.22 (bundle refactor) |
-| `apply-loglevel-fix.py` | `levelToMinLevel` mapping fixed upstream in v2026.3.24. Underlying issue (#29448 — level config not applied to output) persists but requires a different fix. PR #44646 closed. |
-| `apply-cache-trace-redact-apikey.py` | Fixed upstream in v2026.3.24 (trace writer now redacts full payload, apiKey no longer appears in cache-trace.jsonl) |
 
-### Notes for v2026.3.24
-- Patch 2 (approval-auto-expire): indent level changed from 2→3 tabs. Updated 2026-03-25.
-- Patch 6 (memoryflush): code moved from `pi-embedded-*.js` to `agent-runner.runtime-*.js`. Pattern updated to include `newSessionId` parameter. Updated 2026-03-25.
-- Patch 5 (heartbeat): Change 3 (health files) has no matching files — code may have been restructured. Changes 2, 4, 5 apply cleanly.
+| Script | Retired | Reason |
+|--------|---------|--------|
+| `apply-ui-message-vanish-fix.py` | v2026.3.13 | Fixed upstream |
+| `apply-plugin-cache-global.py` | v2026.3.22 | Fixed upstream (bundle refactor) |
+| `apply-cache-trace-redact-apikey.py` | v2026.3.24 | No unredacted files remain |
+| `apply-exec-host-override.py` | v2026.3.31 | Fixed upstream (#57689 — honor per-agent tools.exec defaults) |
+| `apply-approval-auto-expire-fix.py` | v2026.3.31 | Tabled — exec approvals disabled, OC Firewall handles security |
+| `apply-approval-prefix-match.py` | v2026.3.31 | Tabled — exec approvals disabled, OC Firewall handles security |
+| `apply-approval-desc-routing.py` | v2026.3.31 | Tabled — exec approvals disabled, OC Firewall handles security |
+| `apply-session-key-cli.py` | v2026.3.31 | Superseded by native `--session-id` flag (v2026.3.22) |
+| `ws-handshake-timeout.sh` | v2026.3.28 | Fixed upstream (bumped to 10s + env var) |
+
+### Notes for v2026.3.31
+- Patch 1 (heartbeat): Changes 3+5 no longer match — code refactored upstream. Changes 2+4 still apply cleanly.
+- Patch 2 (memoryflush): Buggy pattern exists in 1 of 4 files with the counter variable. The other 3 files have the variable but not the bug.
+- Patch 3 (loglevel): Was briefly retired on v2026.3.24 but the fix was incomplete. Still applies to 2 files on v2026.3.31.
+- Patch 4 (cron-duplicate): Adds `lastRunAtMs > next` guard in `isRunnableJob`. Target: `gateway-cli-*.js`. Mirrors existing pattern in `recomputeNextRunsForMaintenance`.
 
 ## Usage
 
@@ -53,11 +61,11 @@ The master script also supports:
 - `--skip name1 name2` — skip specific patches
 
 ```bash
-# Apply only approval-related patches
-python3 scripts/apply-all.py --only approval-auto-expire approval-prefix-match approval-desc-routing
+# Apply sessions-manage-tool on demand
+python3 scripts/apply-all.py --only sessions-manage-tool
 
-# Apply everything except UI patch
-python3 scripts/apply-all.py --skip ui-message-vanish
+# Dry-run a specific patch
+python3 scripts/apply-heartbeat-sessionkey-fix.py --dry-run
 ```
 
 ## MG Extension Workarounds
