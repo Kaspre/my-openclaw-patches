@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 """
-Patch: Fix inverted levelToMinLevel mapping in logger
-Issue: openclaw/openclaw#29448 / PR #44646
+Patch: Fix logging level config (levelToMinLevel mapping, child logger inheritance,
+       subsystem console filter) — matches upstream PR #44646.
 
-The levelToMinLevel function maps log level names to numeric values that tslog
-uses as minLevel. The shipped mapping is inverted: fatal=0, trace=5. But tslog
-treats lower minLevel = more permissive, so setting logging.level="debug" gives
-minLevel=4, which is WARN level — silently dropping debug/trace entries.
+Issues: openclaw/openclaw#29448, #47529 / PR #44646
 
-Also fixes the comparison in isFileLogLevelEnabled and shouldLogToConsole from
-<= to >= to match the corrected mapping direction.
+Four bugs in the logging system prevent logging.level config from working:
 
-This patch:
-1. Inverts the mapping: fatal=6, error=5, warn=4, info=3, debug=2, trace=1
-2. Changes <= to >= in levelToMinLevel comparisons
+1. levelToMinLevel mapping is inverted relative to tslog v4's logLevelId convention.
+   tslog: 0=silly, 1=trace, 2=debug, 3=info, 4=warn, 5=error, 6=fatal.
+   OC ships: fatal=0, error=1, warn=2, info=3, debug=4, trace=5.
+   So levelToMinLevel("debug")=4 is interpreted by tslog as "warn and above."
+
+2. isFileLogLevelEnabled uses <= comparison which is inverted for the same reason.
+
+3. getChildLogger spreads minLevel: undefined when no level is specified, which
+   overrides the parent logger's configured minLevel. All child loggers (cron,
+   plugins, subsystems) ignore the configured level.
+
+4. toPinoLikeLogger creates sub-loggers without inheriting parent minLevel.
+
+5. shouldLogToConsole in subsystem uses <= comparison (same as #2).
+
+This patch aligns with PR #44646 which fixes all five issues.
 
 Usage:
   python3 apply-loglevel-fix.py [--dry-run] [--dist-dir PATH]
@@ -33,6 +42,7 @@ BACKUP_SUFFIX = ".bak-loglevel"
 
 # --- Replacement patterns ---
 
+# Fix 1: Invert the mapping to match tslog v4 logLevelId
 OLD_MAPPING = """\t\tfatal: 0,
 \t\terror: 1,
 \t\twarn: 2,
@@ -47,8 +57,22 @@ NEW_MAPPING = """\t\tfatal: 6,
 \t\tdebug: 2,
 \t\ttrace: 1,"""
 
-OLD_COMPARISON = "return levelToMinLevel(level) <= levelToMinLevel(settings.level);"
-NEW_COMPARISON = "return levelToMinLevel(level) >= levelToMinLevel(settings.level);"
+# Fix 2: Flip comparison direction in isFileLogLevelEnabled
+OLD_FILE_COMPARISON = "return levelToMinLevel(level) <= levelToMinLevel(settings.level);"
+NEW_FILE_COMPARISON = "return levelToMinLevel(level) >= levelToMinLevel(settings.level);"
+
+# Fix 3: Child logger inherits parent minLevel instead of spreading undefined
+OLD_CHILD_LOGGER = "const minLevel = opts?.level ? levelToMinLevel(opts.level) : void 0;"
+NEW_CHILD_LOGGER = "const minLevel = opts?.level ? levelToMinLevel(opts.level) : base.settings.minLevel;"
+
+# Fix 4: toPinoLikeLogger inherits parent minLevel
+OLD_PINO_SUBLOGGER = "const buildChild = (bindings) => toPinoLikeLogger(logger.getSubLogger({ name: bindings ? JSON.stringify(bindings) : void 0 }), level);"
+NEW_PINO_SUBLOGGER = "const buildChild = (bindings) => toPinoLikeLogger(logger.getSubLogger({ name: bindings ? JSON.stringify(bindings) : void 0, minLevel: logger.settings.minLevel }), level);"
+
+# Fix 5: shouldLogToConsole comparison direction (in subsystem file)
+OLD_CONSOLE_COMPARISON = "return levelToMinLevel(level) <= levelToMinLevel(settings.level);"
+NEW_CONSOLE_COMPARISON = "return levelToMinLevel(level) >= levelToMinLevel(settings.level);"
+# Note: same string as Fix 2, but appears in a different file (subsystem-*.js)
 
 # File patterns to search
 FILE_PATTERNS = [
@@ -57,6 +81,15 @@ FILE_PATTERNS = [
     "utils-*.js",
     "plugin-sdk/logger-*.js",
     "plugin-sdk/subsystem-*.js",
+]
+
+# All fix patterns: (old, new, description)
+FIX_PATTERNS = [
+    (OLD_MAPPING, NEW_MAPPING, "mapping inversion"),
+    (OLD_FILE_COMPARISON, NEW_FILE_COMPARISON, "comparison direction"),
+    (OLD_CHILD_LOGGER, NEW_CHILD_LOGGER, "child logger minLevel inheritance"),
+    (OLD_PINO_SUBLOGGER, NEW_PINO_SUBLOGGER, "pino sub-logger minLevel inheritance"),
+    # Note: OLD_CONSOLE_COMPARISON == OLD_FILE_COMPARISON, so Fix 2 handles both
 ]
 
 
@@ -72,33 +105,31 @@ def find_files(dist_dir):
 
 
 def patch_file(filepath, dry_run=False):
-    """Apply the loglevel fix to a single file. Returns (patched, already_patched, skipped)."""
+    """Apply all loglevel fixes to a single file. Returns (patched, already_patched, skipped)."""
     with open(filepath, "r") as f:
         content = f.read()
 
     basename = os.path.basename(filepath)
-    mapping_count = content.count(OLD_MAPPING)
-    comparison_count = content.count(OLD_COMPARISON)
-    already_mapping = content.count(NEW_MAPPING)
-    already_comparison = content.count(NEW_COMPARISON)
-
-    if mapping_count == 0 and comparison_count == 0:
-        if already_mapping > 0 or already_comparison > 0:
-            print(f"  {basename}: already patched (mapping={already_mapping}, comparison={already_comparison})")
-            return False, True, False
-        print(f"  {basename}: no matching patterns found, skipping")
-        return False, False, True
-
     changes = []
     new_content = content
 
-    if mapping_count > 0:
-        new_content = new_content.replace(OLD_MAPPING, NEW_MAPPING)
-        changes.append(f"mapping x{mapping_count}")
+    for old, new, desc in FIX_PATTERNS:
+        count = new_content.count(old)
+        already = new_content.count(new)
+        if count > 0:
+            new_content = new_content.replace(old, new)
+            changes.append(f"{desc} x{count}")
+        elif already > 0:
+            pass  # Already patched for this pattern
 
-    if comparison_count > 0:
-        new_content = new_content.replace(OLD_COMPARISON, NEW_COMPARISON)
-        changes.append(f"comparison x{comparison_count}")
+    if not changes:
+        # Check if any new patterns exist (already patched)
+        any_new = any(content.count(new) > 0 for _, new, _ in FIX_PATTERNS)
+        if any_new:
+            print(f"  {basename}: already patched")
+            return False, True, False
+        print(f"  {basename}: no matching patterns found, skipping")
+        return False, False, True
 
     if dry_run:
         print(f"  {basename}: WOULD patch ({', '.join(changes)})")
@@ -117,7 +148,7 @@ def patch_file(filepath, dry_run=False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fix inverted levelToMinLevel mapping")
+    parser = argparse.ArgumentParser(description="Fix logging level config (PR #44646)")
     parser.add_argument("--dry-run", action="store_true", help="Show what would change without modifying files")
     parser.add_argument("--dist-dir", default=DIST_DIR_DEFAULT, help="OpenClaw dist directory")
     args = parser.parse_args()
@@ -131,7 +162,7 @@ def main():
         print("ERROR: no matching files found")
         sys.exit(1)
 
-    print(f"{'DRY RUN — ' if args.dry_run else ''}Patching levelToMinLevel in {len(files)} files:")
+    print(f"{'DRY RUN — ' if args.dry_run else ''}Patching loglevel (PR #44646) in {len(files)} files:")
 
     patched = 0
     already = 0
