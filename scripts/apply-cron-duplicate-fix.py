@@ -29,8 +29,10 @@ DIST_DIR_DEFAULT = os.path.expanduser(
 
 BACKUP_SUFFIX = ".bak-cron-dup"
 
-# The target file contains isRunnableJob in the gateway bundle
-TARGET_FILENAME = "gateway-cli-ChUE8Mp7.js"
+# The target file contains isRunnableJob. In v2026.4.9 it moved from
+# gateway-cli-*.js to server.impl-*.js. We glob for both and pick whichever
+# contains the actual function body.
+TARGET_FILENAME = "server.impl-*.js"  # legacy: "gateway-cli-ChUE8Mp7.js"
 
 # --- Replacement patterns ---
 # The original line returns true unconditionally when nowMs >= next.
@@ -49,23 +51,28 @@ NEW_CODE = (
 
 
 def find_target(dist_dir):
-    """Find the gateway bundle file. Try exact name first, then glob."""
-    exact = os.path.join(dist_dir, TARGET_FILENAME)
-    if os.path.isfile(exact):
-        return exact
+    """Find the bundle file containing isRunnableJob.
 
-    # Hash in filename may change on upgrade — search for pattern
+    History:
+      - v2026.4.8 and earlier: function lives in gateway-cli-*.js
+      - v2026.4.9+: function moved to server.impl-*.js
+    Try both patterns and pick whichever contains the function.
+    """
     import glob
-    candidates = glob.glob(os.path.join(dist_dir, "gateway-cli-*.js"))
-    candidates = [c for c in candidates if not c.endswith(BACKUP_SUFFIX)]
-    if len(candidates) == 1:
-        return candidates[0]
-    elif len(candidates) > 1:
-        # Pick the one containing isRunnableJob
+    patterns = ["server.impl-*.js", "gateway-cli-*.js"]
+    for pattern in patterns:
+        candidates = glob.glob(os.path.join(dist_dir, pattern))
+        candidates = [c for c in candidates if not c.endswith(BACKUP_SUFFIX)]
         for c in candidates:
-            with open(c, "r") as f:
-                if "isRunnableJob" in f.read(500000):
-                    return c
+            try:
+                with open(c, "r") as f:
+                    content = f.read()
+                if "function isRunnableJob" in content or "isRunnableJob(" in content:
+                    # Require the specific OLD_CODE or ALREADY_PATCHED marker too
+                    if OLD_CODE in content or "lastRunAtMs > next)) return true;" in content:
+                        return c
+            except OSError:
+                pass
     return None
 
 

@@ -33,10 +33,18 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 PATCHES = [
     ("heartbeat-sessionkey", "apply-heartbeat-sessionkey-fix.py"),
     ("memoryflush-fix", "apply-memoryflush-fix.py"),
-    ("loglevel-fix", "apply-loglevel-fix.py"),
+    # Retired in v2026.4.9: PR #44646 landed upstream. All 5 loglevel issues
+    # (inverted mapping, <= file/console comparisons, child logger minLevel
+    # inheritance, sub-logger minLevel propagation) are fixed in v4.9 bundles.
+    # Verified 2026-04-09 in logger--Y4fLUmQ.js + subsystem-C1arrdPy.js.
+    # Script kept on disk for archaeology.
+    # ("loglevel-fix", "apply-loglevel-fix.py"),
     ("cron-duplicate-fix", "apply-cron-duplicate-fix.py"),
     ("bootstrap-missing-marker-fix", "apply-bootstrap-missing-marker-fix.py"),
-    ("cache-trace-systemprompt-fix", "apply-cache-trace-systemprompt-fix.py"),
+    # Retired in v2026.4.9: merged upstream (PR #58928 effectively landed as a
+    # fallback read `context.systemPrompt ?? context.system` at the recordStage
+    # call site in pi-embedded-*.js). Script kept on disk for archaeology.
+    # ("cache-trace-systemprompt-fix", "apply-cache-trace-systemprompt-fix.py"),
     ("plugin-register-skip-on-inspection", "apply-plugin-register-skip-on-inspection.py"),
     ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
     # On hold — apply with: --only sessions-manage-tool

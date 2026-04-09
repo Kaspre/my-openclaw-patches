@@ -67,8 +67,19 @@ REPLACEMENTS = [
 
 
 def find_target_files(dist_dir):
-    """Find JS files containing the memoryFlush counter pattern.
-    v2026.3.8 used compact-*.js; v2026.3.12+ bundles into config-*.js and others."""
+    """Find JS files that actually contain the memoryFlush counter-reassignment bug.
+
+    We look for a tight signature — the REASSIGN line or a FIX-comment marker —
+    rather than any file referencing `incrementCompactionCount`, because the
+    function has many callers that don't have the bug (imports, resets, etc.)
+    and broad matching produces scary-but-cosmetic "no matching patterns found"
+    errors in apply-all output.
+
+    Signatures that count as a target:
+      - contains the buggy REASSIGN line (unpatched)
+      - contains our FIX #12590 marker (already patched — still report it so the
+        caller can see "SKIP already patched" instead of "file not found")
+    """
     patterns = [
         os.path.join(dist_dir, "*.js"),
         os.path.join(dist_dir, "plugin-sdk", "*.js"),
@@ -78,9 +89,13 @@ def find_target_files(dist_dir):
         all_js.extend(f for f in glob.glob(pat) if ".bak" not in f)
     target = []
     for f in sorted(all_js):
-        with open(f, "r") as fh:
-            if "incrementCompactionCount" in fh.read():
-                target.append(f)
+        try:
+            with open(f, "r") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+        if OLD_REASSIGN in content or "FIX #12590" in content:
+            target.append(f)
     return target
 
 
