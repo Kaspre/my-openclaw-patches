@@ -37,6 +37,8 @@ PATCHES = [
     ("cron-duplicate-fix", "apply-cron-duplicate-fix.py"),
     ("bootstrap-missing-marker-fix", "apply-bootstrap-missing-marker-fix.py"),
     ("cache-trace-systemprompt-fix", "apply-cache-trace-systemprompt-fix.py"),
+    ("plugin-register-skip-on-inspection", "apply-plugin-register-skip-on-inspection.py"),
+    ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
     # On hold — apply with: --only sessions-manage-tool
     # ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
 ]
