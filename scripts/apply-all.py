@@ -5,14 +5,23 @@ Apply all OpenClaw patches in the correct order.
 Usage:
   python3 apply-all.py [--dry-run] [--dist-dir PATH]
 
-Active patches (v2026.3.31):
-  1. heartbeat-sessionkey    — exec notification delivery (Changes 2+4 of PR #21682)
-  2. memoryflush-fix         — flush fires every compaction (#12590)
-  3. loglevel-fix            — inverted levelToMinLevel mapping (#29448)
-  4. cron-duplicate-fix      — prevent duplicate job execution after restart (#42640)
+Active patches (v2026.4.12):
+  1. heartbeat-sessionkey              — exec notification delivery (Changes 2+4 of PR #21682)
+  2. memoryflush-fix                   — flush fires every compaction (#12590)
+  3. bootstrap-missing-marker-fix      — suppress BOOTSTRAP.md marker (#42542)
+  4. plugin-register-skip-on-inspection — skip register() during inspection (#56522)
+  5. cli-exit-fix                      — process.exit after CLI completes (#64072 partial)
 
 On hold:
-  4. sessions-manage-tool    — programmatic session compact/reset (PR #52422, apply on demand)
+  - sessions-manage-tool    — programmatic session compact/reset (PR #52422, apply on demand)
+
+Retired on v2026.4.12:
+  - cron-duplicate-fix      — superseded upstream (previousRunAtMs guard + #63507)
+  - channels-before-ws-handlers — merged upstream (#63480 in v4.10)
+
+Retired on v2026.4.9:
+  - loglevel-fix            — merged upstream (PR #44646)
+  - cache-trace-systemprompt-fix — merged upstream (PR #58928)
 
 Retired on v2026.3.31:
   - exec-host-override      — fixed upstream (#57689)
@@ -39,14 +48,18 @@ PATCHES = [
     # Verified 2026-04-09 in logger--Y4fLUmQ.js + subsystem-C1arrdPy.js.
     # Script kept on disk for archaeology.
     # ("loglevel-fix", "apply-loglevel-fix.py"),
-    ("cron-duplicate-fix", "apply-cron-duplicate-fix.py"),
+    # Retired in v2026.4.12: upstream isRunnableJob now uses previousRunAtMs > lastRunAtMs
+    # guard for cron jobs + #63507 fixes nextRunAtMs <= 0. Script kept for archaeology.
+    # ("cron-duplicate-fix", "apply-cron-duplicate-fix.py"),
     ("bootstrap-missing-marker-fix", "apply-bootstrap-missing-marker-fix.py"),
     # Retired in v2026.4.9: merged upstream (PR #58928 effectively landed as a
     # fallback read `context.systemPrompt ?? context.system` at the recordStage
     # call site in pi-embedded-*.js). Script kept on disk for archaeology.
     # ("cache-trace-systemprompt-fix", "apply-cache-trace-systemprompt-fix.py"),
     ("plugin-register-skip-on-inspection", "apply-plugin-register-skip-on-inspection.py"),
-    ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
+    # Retired in v2026.4.12: merged upstream (#63480 in v4.10 release notes).
+    # Script kept for archaeology.
+    # ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
     ("cli-exit-fix", "apply-cli-exit-fix.py"),
     # On hold — apply with: --only sessions-manage-tool
     # ("sessions-manage-tool", "apply-sessions-manage-tool.py"),

@@ -15,14 +15,15 @@ python3 scripts/apply-all.py
 systemctl --user restart openclaw-gateway
 ```
 
-## Active Patches (v2026.3.31)
+## Active Patches (v2026.4.12)
 
 | # | Script | Issue | Files | Description |
 |---|--------|-------|-------|-------------|
 | 1 | `apply-heartbeat-sessionkey-fix.py` | #14191 / PR #50818 | 2 | Fix exec notification delivery (Changes 2+4 of PR #21682; Changes 3+5 refactored upstream) |
 | 2 | `apply-memoryflush-fix.py` | #12590 / PR #51421 | 1 | Fix flush skipping every other compaction |
-| 3 | `apply-loglevel-fix.py` | #29448 / PR #44646 | 2 | Fix inverted levelToMinLevel mapping |
-| 4 | `apply-cron-duplicate-fix.py` | #42640 / PR #42729 | 1 | Prevent duplicate cron job execution after gateway restart |
+| 3 | `apply-bootstrap-missing-marker-fix.py` | #26877 / PR #42542 | 1 | Suppress BOOTSTRAP.md missing marker injection |
+| 4 | `apply-plugin-register-skip-on-inspection.py` | #56522 | 1 | Skip register() during plugin inspection (startup perf) |
+| 5 | `apply-cli-exit-fix.py` | #63609 | 2 | process.exit after CLI completes (partial — #64072 covers Windows) |
 
 ### On Hold
 
@@ -34,21 +35,24 @@ systemctl --user restart openclaw-gateway
 
 | Script | Retired | Reason |
 |--------|---------|--------|
+| `apply-channels-before-ws-handlers.py` | v2026.4.12 | Merged upstream (#63480 in v4.10) |
+| `apply-cron-duplicate-fix.py` | v2026.4.12 | Superseded upstream (`previousRunAtMs` guard + #63507) |
+| `apply-loglevel-fix.py` | v2026.4.9 | Merged upstream (PR #44646) |
+| `apply-cache-trace-systemprompt-fix.py` | v2026.4.9 | Merged upstream (PR #58928) |
 | `apply-ui-message-vanish-fix.py` | v2026.3.13 | Fixed upstream |
 | `apply-plugin-cache-global.py` | v2026.3.22 | Fixed upstream (bundle refactor) |
 | `apply-cache-trace-redact-apikey.py` | v2026.3.24 | No unredacted files remain |
-| `apply-exec-host-override.py` | v2026.3.31 | Fixed upstream (#57689 — honor per-agent tools.exec defaults) |
-| `apply-approval-auto-expire-fix.py` | v2026.3.31 | Tabled — exec approvals disabled, OC Firewall handles security |
-| `apply-approval-prefix-match.py` | v2026.3.31 | Tabled — exec approvals disabled, OC Firewall handles security |
-| `apply-approval-desc-routing.py` | v2026.3.31 | Tabled — exec approvals disabled, OC Firewall handles security |
+| `apply-exec-host-override.py` | v2026.3.31 | Fixed upstream (#57689) |
+| `apply-approval-auto-expire-fix.py` | v2026.3.31 | Tabled — OC Firewall handles security |
+| `apply-approval-prefix-match.py` | v2026.3.31 | Tabled — OC Firewall handles security |
+| `apply-approval-desc-routing.py` | v2026.3.31 | Tabled — OC Firewall handles security |
 | `apply-session-key-cli.py` | v2026.3.31 | Superseded by native `--session-id` flag (v2026.3.22) |
 | `ws-handshake-timeout.sh` | v2026.3.28 | Fixed upstream (bumped to 10s + env var) |
 
-### Notes for v2026.3.31
+### Notes for v2026.4.12
 - Patch 1 (heartbeat): Changes 3+5 no longer match — code refactored upstream. Changes 2+4 still apply cleanly.
-- Patch 2 (memoryflush): Buggy pattern exists in 1 of 4 files with the counter variable. The other 3 files have the variable but not the bug.
-- Patch 3 (loglevel): Was briefly retired on v2026.3.24 but the fix was incomplete. Still applies to 2 files on v2026.3.31.
-- Patch 4 (cron-duplicate): Adds `lastRunAtMs > next` guard in `isRunnableJob`. Target: `gateway-cli-*.js`. Mirrors existing pattern in `recomputeNextRunsForMaintenance`.
+- Patch 2 (memoryflush): Buggy pattern exists in 1 of 4 files with the counter variable.
+- Patch 5 (cli-exit): v4.10 #64072 fixes the Windows variant; our patch covers the Linux/WSL case.
 
 ## Usage
 
