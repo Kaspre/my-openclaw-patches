@@ -2,7 +2,7 @@
 
 ## Pre-Upgrade
 
-1. **Backup**: Run `~/my-openclaw-backup/scripts/backup.sh` to create a pre-upgrade restore point (git commit pushed to GitHub — all prior backups are retained as separate commits)
+1. **Backup**: Run `~/my-openclaw-backup/scripts/backup.sh` to create a pre-upgrade restore point (git commit pushed to GitHub — all prior backups are retained as separate commits). The default skips the slow Tier 1 database mirror to I: drive; the daily 3:15 AM cron handles that separately. If you need the mirror too (e.g., DR test), pass `--with-mirror`.
 2. **Check release notes**: `https://github.com/openclaw/openclaw/releases/tag/v<VERSION>` — review for breaking changes, merged patches, and migration notes
 
 ## Upgrade Steps
