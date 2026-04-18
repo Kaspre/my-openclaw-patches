@@ -61,6 +61,7 @@ PATCHES = [
     # Script kept for archaeology.
     # ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
     ("cli-exit-fix", "apply-cli-exit-fix.py"),
+    ("web-search-activate-on-empty", "apply-web-search-activate-on-empty.py"),
     # On hold — apply with: --only sessions-manage-tool
     # ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
 ]
