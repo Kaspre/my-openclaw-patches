@@ -61,7 +61,11 @@ PATCHES = [
     # Script kept for archaeology.
     # ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
     ("cli-exit-fix", "apply-cli-exit-fix.py"),
-    ("web-search-activate-on-empty", "apply-web-search-activate-on-empty.py"),
+    # Retired on v2026.4.15: upstream added resolveBundledPluginCompatibleLoadValues
+    # in activation-context-*.js which plumbs applyPluginAutoEnable + overrides
+    # before the plugin registry loads. Our v4.15 probe returns 12 providers
+    # unpatched. Script kept on disk; re-enable here if the regression returns.
+    # ("web-search-activate-on-empty", "apply-web-search-activate-on-empty.py"),
     # On hold — apply with: --only sessions-manage-tool
     # ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
 ]

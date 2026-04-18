@@ -1,8 +1,8 @@
 # web-search-activate-on-empty
 
-**Applies to:** OpenClaw 2026.4.14 (confirmed)
+**Applies to:** OpenClaw 2026.4.14 (confirmed); **NOT needed on v2026.4.15** (fixed upstream — see retirement note)
 **Target file:** `dist/web-search-providers.runtime-*.js`
-**Upstream:** open issue [#68249](https://github.com/openclaw/openclaw/issues/68249) (same pattern, Brave, filed 2026-04-17); this patch is the basis for our upstream PR draft.
+**Upstream:** open issue [#68249](https://github.com/openclaw/openclaw/issues/68249) (Brave reporter says bug persists on v4.15, but our v4.15 Exa config works unpatched — the upstream fix appears partial)
 
 ## Problem
 
@@ -51,4 +51,8 @@ The "force activate" vector uses `activate: true` (the option name `buildPluginR
 
 ## Retirement
 
-Retire this patch when the upstream fix for #68249 ships in a release we've upgraded to. Re-test on upgrade: if `resolvePluginWebProviders` no longer short-circuits on an empty compatible registry, the patch can be dropped.
+**Effectively retired on v2026.4.15.** Upstream added a new plugin-load pathway (`resolveBundledPluginCompatibleLoadValues` in `activation-context-*.js`) that plumbs `applyPluginAutoEnable` + `applyPluginCompatibilityOverrides` before the registry is loaded. Result: `resolvePluginWebSearchProviders` returns 12 providers on v4.15 unpatched (vs 0 on v4.14). Verified via standalone probe + Einstein dispatch returning `provider: "exa"` results.
+
+**We're keeping the patch script** on disk and registered in `apply-all.py` as a rollback hedge — if a future OC version regresses on this seam we can re-apply without re-deriving the fix. The `apply-all.py --dry-run` still matches the OLD pattern in v4.15 dist (meaning the file we patch is structurally unchanged), so the script would apply cleanly but do nothing useful. That's why we don't run it.
+
+**Remove permanently when:** either (a) confidence in upstream stability across ≥2 further releases, or (b) the target file signature moves and the patch pattern stops matching, whichever comes first.
