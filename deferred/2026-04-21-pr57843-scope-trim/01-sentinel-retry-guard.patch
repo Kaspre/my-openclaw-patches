@@ -1,0 +1,126 @@
+diff --git a/src/gateway/server-restart-sentinel.test.ts b/src/gateway/server-restart-sentinel.test.ts
+index 632ea857a6..44ca90dd36 100644
+--- a/src/gateway/server-restart-sentinel.test.ts
++++ b/src/gateway/server-restart-sentinel.test.ts
+@@ -38,7 +38,11 @@ const mocks = vi.hoisted(() => ({
+     ok: true as const,
+     to: "+15550002",
+   })),
+-  deliverOutboundPayloads: vi.fn(async () => [{ channel: "whatsapp", messageId: "msg-1" }]),
++  deliverOutboundPayloads: vi.fn(async () => ({
++    results: [{ channel: "whatsapp", messageId: "msg-1" }],
++    cancelledCount: 0,
++    allCancelledByHook: false,
++  })),
+   enqueueDelivery: vi.fn(async () => "queue-1"),
+   ackDelivery: vi.fn(async () => {}),
+   failDelivery: vi.fn(async () => {}),
+@@ -156,7 +160,11 @@ describe("scheduleRestartSentinelWake", () => {
+     mocks.resolveOutboundTarget.mockReset();
+     mocks.resolveOutboundTarget.mockReturnValue({ ok: true as const, to: "+15550002" });
+     mocks.deliverOutboundPayloads.mockReset();
+-    mocks.deliverOutboundPayloads.mockResolvedValue([{ channel: "whatsapp", messageId: "msg-1" }]);
++    mocks.deliverOutboundPayloads.mockResolvedValue({
++      results: [{ channel: "whatsapp", messageId: "msg-1" }],
++      cancelledCount: 0,
++      allCancelledByHook: false,
++    });
+     mocks.enqueueDelivery.mockReset();
+     mocks.enqueueDelivery.mockResolvedValue("queue-1");
+     mocks.ackDelivery.mockClear();
+@@ -208,7 +216,11 @@ describe("scheduleRestartSentinelWake", () => {
+     vi.useFakeTimers();
+     mocks.deliverOutboundPayloads
+       .mockRejectedValueOnce(new Error("transport not ready"))
+-      .mockResolvedValueOnce([{ channel: "whatsapp", messageId: "msg-2" }]);
++      .mockResolvedValueOnce({
++        results: [{ channel: "whatsapp", messageId: "msg-2" }],
++        cancelledCount: 0,
++        allCancelledByHook: false,
++      });
+ 
+     const wakePromise = scheduleRestartSentinelWake({ deps: {} as never });
+     await Promise.resolve();
+@@ -264,6 +276,26 @@ describe("scheduleRestartSentinelWake", () => {
+     expect(mocks.failDelivery).toHaveBeenCalledWith("queue-1", "transport still not ready");
+   });
+ 
++  it("does not retry a partial DeliveryError and acks the queued notice", async () => {
++    // Simulate a multi-chunk restart notice where the first chunk landed and
++    // the second chunk failed mid-stream. Retrying would duplicate the prefix.
++    const partialErr = Object.assign(new Error("second chunk failed"), {
++      name: "DeliveryError",
++      sentBeforeError: [{ channel: "whatsapp", messageId: "msg-1" }],
++    });
++    mocks.deliverOutboundPayloads.mockRejectedValueOnce(partialErr);
++
++    await scheduleRestartSentinelWake({ deps: {} as never });
++
++    expect(mocks.deliverOutboundPayloads).toHaveBeenCalledTimes(1);
++    expect(mocks.ackDelivery).toHaveBeenCalledWith("queue-1");
++    expect(mocks.failDelivery).not.toHaveBeenCalled();
++    expect(mocks.logWarn).toHaveBeenCalledWith(
++      expect.stringContaining("partial outbound delivery"),
++      expect.objectContaining({ sentBefore: 1 }),
++    );
++  });
++
+   it("prefers top-level sentinel threadId for wake routing context", async () => {
+     // Legacy or malformed sentinel JSON can still carry a nested threadId.
+     mocks.consumeRestartSentinel.mockResolvedValue({
+diff --git a/src/gateway/server-restart-sentinel.ts b/src/gateway/server-restart-sentinel.ts
+index 2054151709..6d8baa24f2 100644
+--- a/src/gateway/server-restart-sentinel.ts
++++ b/src/gateway/server-restart-sentinel.ts
+@@ -5,6 +5,7 @@ import { parseSessionThreadInfo } from "../config/sessions/thread-info.js";
+ import { formatErrorMessage } from "../infra/errors.js";
+ import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
+ import { deliverOutboundPayloads } from "../infra/outbound/deliver.js";
++import { isDeliveryError } from "../infra/outbound/delivery-error-guard.js";
+ import { ackDelivery, enqueueDelivery, failDelivery } from "../infra/outbound/delivery-queue.js";
+ import { buildOutboundSessionContext } from "../infra/outbound/session-context.js";
+ import { resolveOutboundTarget } from "../infra/outbound/targets.js";
+@@ -83,7 +84,7 @@ async function deliverRestartSentinelNotice(params: {
+   }).catch(() => null);
+   for (let attempt = 1; attempt <= OUTBOUND_MAX_ATTEMPTS; attempt += 1) {
+     try {
+-      const results = await deliverOutboundPayloads({
++      const outcome = await deliverOutboundPayloads({
+         cfg: params.cfg,
+         channel: params.channel,
+         to: params.to,
+@@ -96,7 +97,7 @@ async function deliverRestartSentinelNotice(params: {
+         bestEffort: false,
+         skipQueue: true,
+       });
+-      if (results.length > 0) {
++      if (outcome.results.length > 0 || outcome.allCancelledByHook) {
+         if (queueId) {
+           await ackDelivery(queueId).catch(() => {});
+         }
+@@ -104,6 +105,25 @@ async function deliverRestartSentinelNotice(params: {
+       }
+       throw new Error("outbound delivery returned no results");
+     } catch (err) {
++      // Partial send: chunks landed before the failure; retrying would duplicate
++      // the already-delivered prefix. Accept the prefix and ack, same as the
++      // success path — mirrors the cron-delivery retry guard in delivery-dispatch.
++      if (isDeliveryError(err) && err.sentBeforeError.length > 0) {
++        log.warn(
++          `${params.summary}: partial outbound delivery — accepting prefix, not retrying: ${formatErrorMessage(err)}`,
++          {
++            channel: params.channel,
++            to: params.to,
++            sessionKey: params.sessionKey,
++            attempt,
++            sentBefore: err.sentBeforeError.length,
++          },
++        );
++        if (queueId) {
++          await ackDelivery(queueId).catch(() => {});
++        }
++        return;
++      }
+       const retrying = attempt < OUTBOUND_MAX_ATTEMPTS;
+       const suffix = retrying ? `; retrying in ${OUTBOUND_RETRY_DELAY_MS}ms` : "";
+       log.warn(`${params.summary}: outbound delivery failed${suffix}: ${String(err)}`, {

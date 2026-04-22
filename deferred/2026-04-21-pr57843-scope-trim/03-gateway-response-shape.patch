@@ -1,0 +1,45 @@
+diff --git a/src/infra/outbound/message.ts b/src/infra/outbound/message.ts
+index a5cd3a955c..1772363dc9 100644
+--- a/src/infra/outbound/message.ts
++++ b/src/infra/outbound/message.ts
+@@ -89,7 +89,12 @@ export type MessageSendResult = {
+   via: "direct" | "gateway";
+   mediaUrl: string | null;
+   mediaUrls?: string[];
+-  result?: OutboundDeliveryResult | { messageId: string };
++  // messageId is absent when a message_sending hook cancels all payloads
++  // on a gateway-routed send (#57766). Direct sends always include it.
++  result?:
++    | OutboundDeliveryResult
++    | { messageId: string }
++    | { messageId?: string; runId?: string; channel?: string; cancelledByHook?: boolean };
+   dryRun?: boolean;
+ };
+ 
+@@ -284,7 +289,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
+       requesterSenderUsername: params.requesterSenderUsername,
+       requesterSenderE164: params.requesterSenderE164,
+     });
+-    const results = await deliverOutboundPayloads({
++    const { results } = await deliverOutboundPayloads({
+       cfg,
+       channel: outboundChannel,
+       to: resolvedTarget.to,
+@@ -319,7 +324,16 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
+     };
+   }
+ 
+-  const result = await callMessageGateway<{ messageId: string }>({
++  // Gateway send returns { messageId: string } on normal success or
++  // { runId, channel, cancelledByHook: true } when a message_sending hook
++  // cancels all payloads (#57766). Type reflects both shapes so callers
++  // don't assume messageId is always present.
++  const result = await callMessageGateway<{
++    messageId?: string;
++    runId?: string;
++    channel?: string;
++    cancelledByHook?: boolean;
++  }>({
+     gateway: params.gateway,
+     method: "send",
+     params: {

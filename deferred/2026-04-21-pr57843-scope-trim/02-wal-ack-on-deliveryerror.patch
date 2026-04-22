@@ -1,0 +1,446 @@
+diff --git a/src/infra/outbound/deliver.test.ts b/src/infra/outbound/deliver.test.ts
+index d3eb0365e0..c844bccd40 100644
+--- a/src/infra/outbound/deliver.test.ts
++++ b/src/infra/outbound/deliver.test.ts
+@@ -88,6 +88,8 @@ type DeliverModule = typeof import("./deliver.js");
+ 
+ let deliverOutboundPayloads: DeliverModule["deliverOutboundPayloads"];
+ let normalizeOutboundPayloads: DeliverModule["normalizeOutboundPayloads"];
++let DeliveryError: DeliverModule["DeliveryError"];
++type DeliveryErrorType = InstanceType<DeliverModule["DeliveryError"]>;
+ 
+ const matrixChunkConfig: OpenClawConfig = {
+   channels: { matrix: { textChunkLimit: 4000 } } as OpenClawConfig["channels"],
+@@ -179,7 +181,7 @@ async function runChunkedMatrixDelivery(params?: {
+   const cfg: OpenClawConfig = {
+     channels: { matrix: { textChunkLimit: 2 } } as OpenClawConfig["channels"],
+   };
+-  const results = await deliverOutboundPayloads({
++  const outcome = await deliverOutboundPayloads({
+     cfg,
+     channel: "matrix",
+     to: "!room:example",
+@@ -187,7 +189,7 @@ async function runChunkedMatrixDelivery(params?: {
+     deps: { matrix: sendMatrix },
+     ...(params?.mirror ? { mirror: params.mirror } : {}),
+   });
+-  return { sendMatrix, results };
++  return { sendMatrix, results: outcome.results };
+ }
+ 
+ async function deliverSingleMatrixForHookTest(params?: { sessionKey?: string }) {
+@@ -209,7 +211,7 @@ async function runBestEffortPartialFailureDelivery() {
+     .mockResolvedValueOnce({ messageId: "m2", roomId: "!room:example" });
+   const onError = vi.fn();
+   const cfg: OpenClawConfig = {};
+-  const results = await deliverOutboundPayloads({
++  const outcome = await deliverOutboundPayloads({
+     cfg,
+     channel: "matrix",
+     to: "!room:example",
+@@ -218,7 +220,7 @@ async function runBestEffortPartialFailureDelivery() {
+     bestEffort: true,
+     onError,
+   });
+-  return { sendMatrix, onError, results };
++  return { sendMatrix, onError, results: outcome.results };
+ }
+ 
+ function expectSuccessfulMatrixInternalHookPayload(
+@@ -240,7 +242,8 @@ function expectSuccessfulMatrixInternalHookPayload(
+ 
+ describe("deliverOutboundPayloads", () => {
+   beforeAll(async () => {
+-    ({ deliverOutboundPayloads, normalizeOutboundPayloads } = await import("./deliver.js"));
++    ({ deliverOutboundPayloads, normalizeOutboundPayloads, DeliveryError } =
++      await import("./deliver.js"));
+   });
+ 
+   beforeEach(() => {
+@@ -269,7 +272,6 @@ describe("deliverOutboundPayloads", () => {
+     releasePinnedPluginChannelRegistry();
+     setActivePluginRegistry(emptyRegistry);
+   });
+-
+   it("keeps requester session channel authoritative for delivery media policy", async () => {
+     const resolveMediaAccessSpy = vi.spyOn(
+       mediaCapabilityModule,
+@@ -416,7 +418,7 @@ describe("deliverOutboundPayloads", () => {
+       ]),
+     );
+ 
+-    const results = await deliverOutboundPayloads({
++    const { results } = await deliverOutboundPayloads({
+       cfg: { channels: { matrix: { textChunkLimit: 2 } } } as OpenClawConfig,
+       channel: "matrix",
+       to: "!room",
+@@ -474,7 +476,7 @@ describe("deliverOutboundPayloads", () => {
+       ]),
+     );
+ 
+-    const textResults = await deliverOutboundPayloads({
++    const { results: textResults } = await deliverOutboundPayloads({
+       cfg: { channels: { line: {} } } as OpenClawConfig,
+       channel: "line",
+       to: "U123",
+@@ -671,7 +673,7 @@ describe("deliverOutboundPayloads", () => {
+ 
+   it("drops text payloads after adapter sanitization removes all content", async () => {
+     const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+-    const results = await deliverMatrixPayload({
++    const { results } = await deliverMatrixPayload({
+       sendMatrix,
+       payload: { text: "<br><br>" },
+     });
+@@ -682,7 +684,7 @@ describe("deliverOutboundPayloads", () => {
+ 
+   it("drops plugin HTML-only text payloads after sanitization", async () => {
+     const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+-    const results = await deliverOutboundPayloads({
++    const { results } = await deliverOutboundPayloads({
+       cfg: {},
+       channel: "matrix",
+       to: "!room:example",
+@@ -925,6 +927,32 @@ describe("deliverOutboundPayloads", () => {
+     expect(sendMatrix).not.toHaveBeenCalled();
+   });
+ 
++  it("acks the queue entry on partial DeliveryError to avoid recovery replay", async () => {
++    // First payload lands, second throws. Core wraps in DeliveryError; the
++    // queue wrapper must ack (not fail) so recoverPendingDeliveries() doesn't
++    // replay and duplicate the already-sent prefix on restart.
++    const sendMatrix = vi
++      .fn()
++      .mockResolvedValueOnce({ messageId: "m1", roomId: "!room:example" })
++      .mockRejectedValueOnce(new Error("second chunk failed"));
++    const cfg: OpenClawConfig = {};
++
++    await expect(
++      deliverOutboundPayloads({
++        cfg,
++        channel: "matrix",
++        to: "!room:example",
++        payloads: [{ text: "a" }, { text: "b" }],
++        deps: { matrix: sendMatrix },
++        bestEffort: false,
++      }),
++    ).rejects.toBeInstanceOf(DeliveryError);
++
++    expect(queueMocks.ackDelivery).toHaveBeenCalledWith("mock-queue-id");
++    expect(queueMocks.failDelivery).not.toHaveBeenCalled();
++    expect(sendMatrix).toHaveBeenCalledTimes(2);
++  });
++
+   it("passes normalized payload to onError", async () => {
+     const sendMatrix = vi.fn().mockRejectedValue(new Error("boom"));
+     const onError = vi.fn();
+@@ -1095,7 +1123,7 @@ describe("deliverOutboundPayloads", () => {
+       ]),
+     );
+ 
+-    const results = await deliverOutboundPayloads({
++    const { results } = await deliverOutboundPayloads({
+       cfg: {},
+       channel: "line",
+       to: "U123",
+@@ -1126,7 +1154,7 @@ describe("deliverOutboundPayloads", () => {
+       ]),
+     );
+ 
+-    const results = await deliverOutboundPayloads({
++    const { results } = await deliverOutboundPayloads({
+       cfg: {},
+       channel: "matrix",
+       to: "!room:1",
+@@ -1164,7 +1192,7 @@ describe("deliverOutboundPayloads", () => {
+       ]),
+     );
+ 
+-    const results = await deliverOutboundPayloads({
++    const { results } = await deliverOutboundPayloads({
+       cfg: {},
+       channel: "matrix",
+       to: "!room:1",
+@@ -1263,6 +1291,158 @@ describe("deliverOutboundPayloads", () => {
+       expect.objectContaining({ channelId: "matrix" }),
+     );
+   });
++
++  // --- DeliveryOutcome tests (#57766) ---
++
++  it("returns cancelledCount and allCancelledByHook when hook cancels all payloads", async () => {
++    hookMocks.runner.hasHooks.mockReturnValue(true);
++    (hookMocks.runner as Record<string, unknown>).runMessageSending = vi
++      .fn()
++      .mockResolvedValue({ cancel: true });
++    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
++
++    const outcome = await deliverOutboundPayloads({
++      cfg: matrixChunkConfig,
++      channel: "matrix",
++      to: "!room:example",
++      payloads: [{ text: "a" }, { text: "b" }],
++      deps: { matrix: sendMatrix },
++    });
++
++    expect(outcome.results).toEqual([]);
++    expect(outcome.cancelledCount).toBe(2);
++    expect(outcome.allCancelledByHook).toBe(true);
++    expect(sendMatrix).not.toHaveBeenCalled();
++  });
++
++  it("returns partial cancelledCount when hook cancels some payloads", async () => {
++    hookMocks.runner.hasHooks.mockReturnValue(true);
++    (hookMocks.runner as Record<string, unknown>).runMessageSending = vi
++      .fn()
++      .mockResolvedValueOnce({ cancel: true })
++      .mockResolvedValueOnce(null);
++    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
++
++    const outcome = await deliverOutboundPayloads({
++      cfg: matrixChunkConfig,
++      channel: "matrix",
++      to: "!room:example",
++      payloads: [{ text: "a" }, { text: "b" }],
++      deps: { matrix: sendMatrix },
++    });
++
++    expect(outcome.results).toHaveLength(1);
++    expect(outcome.cancelledCount).toBe(1);
++    expect(outcome.allCancelledByHook).toBe(false);
++    expect(sendMatrix).toHaveBeenCalledTimes(1);
++  });
++
++  it("returns cancelledCount=0 and allCancelledByHook=false on normal delivery", async () => {
++    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
++
++    const outcome = await deliverOutboundPayloads({
++      cfg: matrixChunkConfig,
++      channel: "matrix",
++      to: "!room:example",
++      payloads: [{ text: "hello" }],
++      deps: { matrix: sendMatrix },
++    });
++
++    expect(outcome.results).toHaveLength(1);
++    expect(outcome.cancelledCount).toBe(0);
++    expect(outcome.allCancelledByHook).toBe(false);
++  });
++
++  it("throws DeliveryError with sentBeforeError when non-bestEffort fails after partial send", async () => {
++    const sendMatrix = vi
++      .fn()
++      .mockResolvedValueOnce({ messageId: "m1", roomId: "!room:example" })
++      .mockRejectedValueOnce(new Error("second payload failed"));
++
++    let caughtError: unknown;
++    try {
++      await deliverOutboundPayloads({
++        cfg: matrixChunkConfig,
++        channel: "matrix",
++        to: "!room:example",
++        payloads: [{ text: "a" }, { text: "b" }],
++        deps: { matrix: sendMatrix },
++        bestEffort: false,
++      });
++    } catch (err) {
++      caughtError = err;
++    }
++
++    expect(caughtError).toBeInstanceOf(DeliveryError);
++    const deliveryErr = caughtError as DeliveryErrorType;
++    expect(deliveryErr.sentBeforeError).toHaveLength(1);
++    expect(deliveryErr.sentBeforeError[0]).toMatchObject({ messageId: "m1" });
++    expect(deliveryErr.message).toBe("second payload failed");
++  });
++
++  it("throws original error (not DeliveryError) when non-bestEffort fails on first payload", async () => {
++    const sendMatrix = vi.fn().mockRejectedValue(new Error("first payload failed"));
++
++    await expect(
++      deliverOutboundPayloads({
++        cfg: matrixChunkConfig,
++        channel: "matrix",
++        to: "!room:example",
++        payloads: [{ text: "a" }],
++        deps: { matrix: sendMatrix },
++        bestEffort: false,
++      }),
++    ).rejects.toThrow("first payload failed");
++
++    // Should NOT be a DeliveryError since nothing was sent yet
++    await expect(
++      deliverOutboundPayloads({
++        cfg: matrixChunkConfig,
++        channel: "matrix",
++        to: "!room:example",
++        payloads: [{ text: "a" }],
++        deps: { matrix: sendMatrix },
++        bestEffort: false,
++      }),
++    ).rejects.not.toBeInstanceOf(DeliveryError);
++  });
++
++  it("preserves AbortError identity even after partial send (not wrapped in DeliveryError)", async () => {
++    const makeAbortingSendMatrix = (controller: AbortController) =>
++      vi
++        .fn()
++        .mockResolvedValueOnce({ messageId: "m1", roomId: "!room:example" })
++        .mockImplementationOnce(async () => {
++          controller.abort();
++          throw new DOMException("The operation was aborted", "AbortError");
++        });
++
++    const abortController1 = new AbortController();
++    await expect(
++      deliverOutboundPayloads({
++        cfg: matrixChunkConfig,
++        channel: "matrix",
++        to: "!room:example",
++        payloads: [{ text: "a" }, { text: "b" }],
++        deps: { matrix: makeAbortingSendMatrix(abortController1) },
++        bestEffort: false,
++        abortSignal: abortController1.signal,
++      }),
++    ).rejects.not.toBeInstanceOf(DeliveryError);
++
++    const abortController2 = new AbortController();
++    await expect(
++      deliverOutboundPayloads({
++        cfg: matrixChunkConfig,
++        channel: "matrix",
++        to: "!room:example",
++        payloads: [{ text: "a" }, { text: "b" }],
++        deps: { matrix: makeAbortingSendMatrix(abortController2) },
++        bestEffort: false,
++        abortSignal: abortController2.signal,
++      }),
++    ).rejects.toMatchObject({ name: "AbortError" });
++  });
+ });
+ 
+ const emptyRegistry = createTestRegistry([]);
+diff --git a/src/infra/outbound/deliver.ts b/src/infra/outbound/deliver.ts
+index c5066e0ea7..83fc2ee78f 100644
+--- a/src/infra/outbound/deliver.ts
++++ b/src/infra/outbound/deliver.ts
+@@ -67,6 +67,38 @@ async function loadChannelBootstrapRuntime() {
+   return await channelBootstrapRuntimePromise;
+ }
+ 
++/**
++ * Enriched return type for deliverOutboundPayloads that disambiguates hook
++ * cancellations from delivery failures (see #57766).
++ */
++export interface DeliveryOutcome {
++  results: OutboundDeliveryResult[];
++  /** Number of individual payloads cancelled by message_sending hooks. */
++  cancelledCount: number;
++  /** True when ALL payloads were cancelled by hooks (empty results is intentional). */
++  allCancelledByHook: boolean;
++}
++
++/**
++ * Thrown on non-bestEffort delivery failure when some payloads were already
++ * sent before the error. Callers can inspect sentBeforeError to avoid blind
++ * retries that would duplicate already-delivered messages (see #57766).
++ */
++export class DeliveryError extends Error {
++  /** Results for payloads successfully sent before the throw. */
++  readonly sentBeforeError: OutboundDeliveryResult[];
++
++  constructor(cause: unknown, sentBeforeError: OutboundDeliveryResult[]) {
++    super(cause instanceof Error ? cause.message : String(cause));
++    this.name = "DeliveryError";
++    this.sentBeforeError = sentBeforeError;
++    if (cause instanceof Error) {
++      this.stack = cause.stack;
++      this.cause = cause;
++    }
++  }
++}
++
+ type Chunker = (text: string, limit: number) => string[];
+ 
+ type ChannelHandler = {
+@@ -489,7 +521,7 @@ async function applyMessageSendingHook(params: {
+ 
+ export async function deliverOutboundPayloads(
+   params: DeliverOutboundPayloadsParams,
+-): Promise<OutboundDeliveryResult[]> {
++): Promise<DeliveryOutcome> {
+   const { channel, to, payloads } = params;
+ 
+   // Write-ahead delivery queue: persist before sending, remove after success.
+@@ -527,7 +559,7 @@ export async function deliverOutboundPayloads(
+     : params;
+ 
+   try {
+-    const results = await deliverOutboundPayloadsCore(wrappedParams);
++    const outcome = await deliverOutboundPayloadsCore(wrappedParams);
+     if (queueId) {
+       if (hadPartialFailure) {
+         await failDelivery(queueId, "partial delivery failure (bestEffort)").catch(() => {});
+@@ -535,10 +567,14 @@ export async function deliverOutboundPayloads(
+         await ackDelivery(queueId).catch(() => {}); // Best-effort cleanup.
+       }
+     }
+-    return results;
++    return outcome;
+   } catch (err) {
+     if (queueId) {
+-      if (isAbortError(err)) {
++      if (isAbortError(err) || err instanceof DeliveryError) {
++        // AbortError: caller interrupted delivery.
++        // DeliveryError: partial send landed before the throw — leaving the
++        // entry pending would replay the already-sent prefix on restart.
++        // Both cases ack so recoverPendingDeliveries() skips them.
+         await ackDelivery(queueId).catch(() => {});
+       } else {
+         await failDelivery(queueId, formatErrorMessage(err)).catch(() => {});
+@@ -551,7 +587,7 @@ export async function deliverOutboundPayloads(
+ /** Core delivery logic (extracted for queue wrapper). */
+ async function deliverOutboundPayloadsCore(
+   params: DeliverOutboundPayloadsCoreParams,
+-): Promise<OutboundDeliveryResult[]> {
++): Promise<DeliveryOutcome> {
+   const { cfg, channel, to, payloads } = params;
+   const outboundPayloadPlan = createOutboundPayloadPlan(payloads);
+   const accountId = params.accountId;
+@@ -665,6 +701,7 @@ async function deliverOutboundPayloadsCore(
+       },
+     );
+   }
++  let cancelledCount = 0;
+   for (const payload of normalizedPayloads) {
+     let payloadSummary = buildPayloadSummary(payload);
+     try {
+@@ -681,6 +718,7 @@ async function deliverOutboundPayloadsCore(
+         accountId,
+       });
+       if (hookResult.cancelled) {
++        cancelledCount++;
+         continue;
+       }
+       const effectivePayload = hookResult.payload;
+@@ -784,7 +822,11 @@ async function deliverOutboundPayloadsCore(
+         error: formatErrorMessage(err),
+       });
+       if (!params.bestEffort) {
+-        throw err;
++        // Wrap in DeliveryError when payloads were already sent before the throw,
++        // so callers can detect partial delivery and avoid blind retries (#57766).
++        // Preserve AbortError identity so the outer queue wrapper can ack the
++        // write-ahead entry instead of marking it failed and replaying later.
++        throw results.length > 0 && !isAbortError(err) ? new DeliveryError(err, [...results]) : err;
+       }
+       params.onError?.(err, payloadSummary);
+     }
+@@ -805,5 +847,6 @@ async function deliverOutboundPayloadsCore(
+     }
+   }
+ 
+-  return results;
++  const allCancelledByHook = cancelledCount > 0 && cancelledCount === normalizedPayloads.length;
++  return { results, cancelledCount, allCancelledByHook };
+ }
