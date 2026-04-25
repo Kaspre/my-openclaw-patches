@@ -59,14 +59,15 @@ DIST_DIR_DEFAULT = os.path.expanduser(
 BACKUP_SUFFIX = ".bak-bootstrap-missing"
 TARGET_GLOB = "workspace-*.js"
 
-# Unique pattern: the else branch of the load loop inside
-# loadWorkspaceBootstrapFiles. In the compiled bundle this appears exactly
-# once (only loadWorkspaceBootstrapFiles pushes a {missing: true} record in
-# this specific shape).
-OLD_CODE = """	const memoryEntry = await resolveMemoryBootstrapEntry(resolvedDir);
-	if (memoryEntry) entries.push(memoryEntry);
-	const result = [];
+# Unique pattern: the load loop inside loadWorkspaceBootstrapFiles.
+# v4.23+ shape: `resolveMemoryBootstrapEntry` removed; DEFAULT_MEMORY_FILENAME
+# is now declared inline in the entries array, with the per-iteration
+# `if (entry.name === DEFAULT_MEMORY_FILENAME && !await exactWorkspaceEntryExists(...))`
+# guard acting as the new "skip if absent" mechanism. The skip-memory clause
+# anchors uniqueness — DEFAULT_MEMORY_FILENAME appears twice in one line.
+OLD_CODE = """	const result = [];
 	for (const entry of entries) {
+		if (entry.name === DEFAULT_MEMORY_FILENAME && !await exactWorkspaceEntryExists(resolvedDir, DEFAULT_MEMORY_FILENAME)) continue;
 		const loaded = await readWorkspaceFileWithGuards({
 			filePath: entry.filePath,
 			workspaceDir: resolvedDir
@@ -86,14 +87,13 @@ OLD_CODE = """	const memoryEntry = await resolveMemoryBootstrapEntry(resolvedDir
 	return result;
 }"""
 
-NEW_CODE = """	const memoryEntry = await resolveMemoryBootstrapEntry(resolvedDir);
-	if (memoryEntry) entries.push(memoryEntry);
-	let onboardingCompleted = false;
+NEW_CODE = """	let onboardingCompleted = false;
 	try {
 		onboardingCompleted = await isWorkspaceSetupCompleted(resolvedDir);
 	} catch {}
 	const result = [];
 	for (const entry of entries) {
+		if (entry.name === DEFAULT_MEMORY_FILENAME && !await exactWorkspaceEntryExists(resolvedDir, DEFAULT_MEMORY_FILENAME)) continue;
 		const loaded = await readWorkspaceFileWithGuards({
 			filePath: entry.filePath,
 			workspaceDir: resolvedDir

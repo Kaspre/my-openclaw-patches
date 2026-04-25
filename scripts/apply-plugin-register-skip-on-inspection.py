@@ -97,17 +97,15 @@ BACKUP_SUFFIX = ".bak-plugin-register-skip"
 TARGET_GLOB = "loader-*.js"
 
 # The exact block in the bundled loader. Indentation is tabs, matching Rollup output.
-# This is the `try { const result = register(api); ... }` block inside
-# loadOpenClawPlugins'es per-plugin loop (the variant used by the gateway startup
-# path; not the separate `loadOpenClawPluginCliRegistry` variant for CLI metadata).
+# v4.23+ shape: register call moved into runPluginRegisterSync wrapper, invoked
+# via withProfile(). The amplification-path call site is in loadOpenClawPlugins'
+# per-plugin loop (registrationMode is dynamic via template literal); the
+# separate cli-metadata:register call site (literal string) is left untouched.
 OLD_CODE = """\t\t\ttry {
-\t\t\t\tconst result = register(api);
-\t\t\t\tif (result && typeof result.then === "function") registry.diagnostics.push({
-\t\t\t\t\tlevel: "warn",
+\t\t\t\twithProfile({
 \t\t\t\t\tpluginId: record.id,
-\t\t\t\t\tsource: record.source,
-\t\t\t\t\tmessage: "plugin register returned a promise; async registration is ignored"
-\t\t\t\t});"""
+\t\t\t\t\tsource: record.source
+\t\t\t\t}, `${registrationMode}:register`, () => runPluginRegisterSync(register, api));"""
 
 NEW_CODE = """\t\t\ttry {
 \t\t\t\t// LOCAL PATCH (Option A, register-amplification): when shouldActivate
@@ -118,16 +116,12 @@ NEW_CODE = """\t\t\ttry {
 \t\t\t\t// rollback branch below is the existing code's acknowledgement that
 \t\t\t\t// "we don't want the effects here anyway." Benefits all plugins.
 \t\t\t\t// See: ~/.openclaw/workspace/docs/findings/2026-04-08-plugin-register-amplification.md
-\t\t\t\tlet result;
 \t\t\t\tif (shouldActivate) {
-\t\t\t\t\tresult = register(api);
-\t\t\t\t}
-\t\t\t\tif (result && typeof result.then === "function") registry.diagnostics.push({
-\t\t\t\t\tlevel: "warn",
-\t\t\t\t\tpluginId: record.id,
-\t\t\t\t\tsource: record.source,
-\t\t\t\t\tmessage: "plugin register returned a promise; async registration is ignored"
-\t\t\t\t});"""
+\t\t\t\t\twithProfile({
+\t\t\t\t\t\tpluginId: record.id,
+\t\t\t\t\t\tsource: record.source
+\t\t\t\t\t}, `${registrationMode}:register`, () => runPluginRegisterSync(register, api));
+\t\t\t\t}"""
 
 # Present-after-patch marker that is NOT present in the unpatched code.
 # Used to detect idempotent re-application.
