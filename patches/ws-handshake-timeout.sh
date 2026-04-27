@@ -1,9 +1,30 @@
 #!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────
+# OBSOLETE on v2026.4.24+ (verified 2026-04-26).
+#
+# Upstream removed the hardcoded constants this script targets:
+#   - DEFAULT_HANDSHAKE_TIMEOUT_MS=3e3 → no longer in dist
+#   - connectChallengeTimeoutMs=2e3 literal → now opts.connectChallengeTimeoutMs (configurable)
+#
+# Running this script on v4.24+ will silently no-op (0 matches for the target
+# regex patterns). Eval batch on 2026-04-26 confirmed CLI commands connect
+# reliably without this patch (~324 successful openclaw agent invocations).
+#
+# If WS handshake errors return on v4.24+: set opts.connectChallengeTimeoutMs
+# instead — check config-schema.json for the gateway.* config knob.
+#
+# Retained on disk for archaeology / rollback if a future upgrade reintroduces
+# the literal constants.
+# ─────────────────────────────────────────────────────────────────────────
+
 set -euo pipefail
 
+# Stale path: was for old v25.6.1 Node. Update to current if reactivating.
 DIST_DIR="/home/captain/.nvm/versions/node/v25.6.1/lib/node_modules/openclaw/dist"
 
 echo "=== WS Handshake Timeout Patch (#44718) ==="
+echo "WARNING: This patch is OBSOLETE on v2026.4.24+. See header comment."
+echo
 echo "Dist dir: $DIST_DIR"
 echo
 

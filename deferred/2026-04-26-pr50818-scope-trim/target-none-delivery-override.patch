@@ -1,0 +1,309 @@
+commit d4e3c62219680fde36fc2bce7461c9e6bd7f6962
+Author: Kaspre <kaspre@gmail.com>
+Date:   Thu Apr 2 11:43:18 2026 -0400
+
+    fix(heartbeat): propagate sessionKey in exec/hooks to fix async context loss
+    
+    Exec completion events enqueued under cron or channel-specific session
+    keys were invisible to the heartbeat runner, which always checked the
+    agent's main session key. This caused exec results to silently vanish
+    instead of being relayed back to the originating channel.
+    
+    1. Propagate sessionKey through scopedHeartbeatWakeOptions in exec,
+       hook, and ACP spawn paths
+    2. Add resolveEventSessionKey to remap cron session keys to the
+       originating agent's main session key for event enqueueing
+    3. Override target:none for exec completion events so results route
+       to the session's last delivery target
+    4. Anchor exec completion regex to prevent false-positive matches
+       on cron reminder text
+    
+    Fixes #52305, #39978. Related: #18237.
+    
+    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+diff --git a/src/infra/heartbeat-runner.ghost-reminder.test.ts b/src/infra/heartbeat-runner.ghost-reminder.test.ts
+index 7d29c99e0d..6b4dd271ef 100644
+--- a/src/infra/heartbeat-runner.ghost-reminder.test.ts
++++ b/src/infra/heartbeat-runner.ghost-reminder.test.ts
+@@ -274,10 +274,10 @@ describe("Ghost reminder bug (issue #13317)", () => {
+     expect(sendTelegram).not.toHaveBeenCalled();
+   });
+ 
+-  it("uses an internal-only exec prompt when delivery target is none", async () => {
++  it("relays exec prompt to last channel when delivery target is none", async () => {
+     const { result, sendTelegram, calledCtx } = await runHeartbeatCase({
+       tmpPrefix: "openclaw-exec-internal-",
+-      replyText: "Handled internally",
++      replyText: "Exec completed successfully",
+       reason: "exec-event",
+       target: "none",
+       enqueue: (sessionKey) => {
+@@ -288,8 +288,9 @@ describe("Ghost reminder bug (issue #13317)", () => {
+     expect(result.status).toBe("ran");
+     expect(calledCtx?.Provider).toBe("exec-event");
+     expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(true);
+-    expect(calledCtx?.Body).toContain("Handle the result internally");
+-    expect(sendTelegram).not.toHaveBeenCalled();
++    expect(calledCtx?.Body).toContain("Please relay the command output to the user");
++    expect(calledCtx?.Body).not.toContain("Handle the result internally");
++    expect(sendTelegram).toHaveBeenCalled();
+   });
+ 
+   it("classifies hook:wake exec completions as exec-event prompts", async () => {
+diff --git a/src/infra/heartbeat-runner.returns-default-unset.test.ts b/src/infra/heartbeat-runner.returns-default-unset.test.ts
+index d520124b91..4e889c6ef0 100644
+--- a/src/infra/heartbeat-runner.returns-default-unset.test.ts
++++ b/src/infra/heartbeat-runner.returns-default-unset.test.ts
+@@ -1519,7 +1519,7 @@ describe("runHeartbeatOnce", () => {
+     }
+   });
+ 
+-  it("uses an internal-only exec prompt when heartbeat delivery target is none", async () => {
++  it("relays exec completion to last channel when heartbeat delivery target is none", async () => {
+     const tmpDir = await createCaseDir("hb-exec-target-none");
+     const storePath = path.join(tmpDir, "sessions.json");
+     const cfg: OpenClawConfig = {
+@@ -1564,7 +1564,12 @@ describe("runHeartbeatOnce", () => {
+         deps: createHeartbeatDeps(sendWhatsApp, { getReplyFromConfig: replySpy }),
+       });
+       expect(res.status).toBe("ran");
+-      expect(sendWhatsApp).toHaveBeenCalledTimes(0);
++      expect(sendWhatsApp).toHaveBeenCalledTimes(1);
++      expect(sendWhatsApp).toHaveBeenCalledWith(
++        "120363401234567890@g.us",
++        "Exec completed successfully",
++        expect.objectContaining({ accountId: undefined }),
++      );
+       const calledCtx = replySpy.mock.calls[0]?.[0] as {
+         Provider?: string;
+         Body?: string;
+@@ -1572,8 +1577,8 @@ describe("runHeartbeatOnce", () => {
+       };
+       expect(calledCtx.Provider).toBe("exec-event");
+       expect(calledCtx.ForceSenderIsOwnerFalse).toBe(true);
+-      expect(calledCtx.Body).toContain("Handle the result internally");
+-      expect(calledCtx.Body).not.toContain("Please relay the command output to the user");
++      expect(calledCtx.Body).toContain("Please relay the command output to the user");
++      expect(calledCtx.Body).not.toContain("Handle the result internally");
+     } finally {
+       replySpy.mockReset();
+     }
+diff --git a/src/infra/heartbeat-runner.ts b/src/infra/heartbeat-runner.ts
+index 8259076e34..8a229ff592 100644
+--- a/src/infra/heartbeat-runner.ts
++++ b/src/infra/heartbeat-runner.ts
+@@ -772,69 +772,6 @@ export async function runHeartbeatOnce(opts: {
+   // sending the full conversation history (~100K tokens) to the LLM.
+   // Delivery routing still uses the main session entry (lastChannel, lastTo).
+   const useIsolatedSession = heartbeat?.isolatedSession === true;
+-  const delivery = resolveHeartbeatDeliveryTarget({
+-    cfg,
+-    entry,
+-    heartbeat,
+-    // Isolated heartbeat runs drain system events from their dedicated
+-    // `:heartbeat` session, not from the base session we peek during preflight.
+-    // Reusing base-session turnSource routing here can pin later isolated runs
+-    // to stale channels/threads because that base-session event context remains queued.
+-    turnSource: useIsolatedSession ? undefined : preflight.turnSourceDeliveryContext,
+-  });
+-  const heartbeatAccountId = heartbeat?.accountId?.trim();
+-  if (delivery.reason === "unknown-account") {
+-    log.warn("heartbeat: unknown accountId", {
+-      accountId: delivery.accountId ?? heartbeatAccountId ?? null,
+-      target: heartbeat?.target ?? "none",
+-    });
+-  } else if (heartbeatAccountId) {
+-    log.info("heartbeat: using explicit accountId", {
+-      accountId: delivery.accountId ?? heartbeatAccountId,
+-      target: heartbeat?.target ?? "none",
+-      channel: delivery.channel,
+-    });
+-  }
+-  const visibility =
+-    delivery.channel !== "none"
+-      ? resolveHeartbeatVisibility({
+-          cfg,
+-          channel: delivery.channel,
+-          accountId: delivery.accountId,
+-        })
+-      : { showOk: false, showAlerts: true, useIndicator: true };
+-  const { sender } = resolveHeartbeatSenderContext({ cfg, entry, delivery });
+-  const responsePrefix = resolveEffectiveMessagesConfig(cfg, agentId, {
+-    channel: delivery.channel !== "none" ? delivery.channel : undefined,
+-    accountId: delivery.accountId,
+-  }).responsePrefix;
+-
+-  const canRelayToUser = Boolean(
+-    delivery.channel !== "none" && delivery.to && visibility.showAlerts,
+-  );
+-  const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+-  const { prompt, hasExecCompletion, hasCronEvents } = resolveHeartbeatRunPrompt({
+-    cfg,
+-    heartbeat,
+-    preflight,
+-    canRelayToUser,
+-    workspaceDir,
+-    startedAt,
+-    heartbeatFileContent: preflight.heartbeatFileContent,
+-  });
+-
+-  // If no tasks are due, skip heartbeat entirely
+-  if (prompt === null) {
+-    // Wake-triggered events should stay queued when the run short-circuits:
+-    // no reply turn ran, so there is nothing that actually consumed that wake payload.
+-    const shouldConsumeInspectedEvents =
+-      !preflight.isWakeReason && preflight.shouldInspectPendingEvents;
+-    if (shouldConsumeInspectedEvents && preflight.pendingEventEntries.length > 0) {
+-      consumeSystemEventEntries(sessionKey, preflight.pendingEventEntries);
+-    }
+-    return { status: "skipped", reason: "no-tasks-due" };
+-  }
+-
+   let runSessionKey = sessionKey;
+   if (useIsolatedSession) {
+     const configuredSession = resolveHeartbeatSession(cfg, agentId, heartbeat);
+@@ -896,6 +833,65 @@ export async function runHeartbeatOnce(opts: {
+     runSessionKey === sessionKey
+       ? preflight.pendingEventEntries
+       : peekSystemEventEntries(runSessionKey);
++  const hasExecCompletionPending =
++    preflight.isExecEventReason &&
++    activeSessionPendingEventEntries.some((event) => isExecCompletionEvent(event.text));
++  const delivery = resolveHeartbeatDeliveryTarget({
++    cfg,
++    entry,
++    heartbeat,
++    turnSource: useIsolatedSession ? undefined : preflight.turnSourceDeliveryContext,
++    forceLastTargetWhenNone: hasExecCompletionPending,
++  });
++  const heartbeatAccountId = heartbeat?.accountId?.trim();
++  if (delivery.reason === "unknown-account") {
++    log.warn("heartbeat: unknown accountId", {
++      accountId: delivery.accountId ?? heartbeatAccountId ?? null,
++      target: heartbeat?.target ?? "none",
++    });
++  } else if (heartbeatAccountId) {
++    log.info("heartbeat: using explicit accountId", {
++      accountId: delivery.accountId ?? heartbeatAccountId,
++      target: heartbeat?.target ?? "none",
++      channel: delivery.channel,
++    });
++  }
++  const visibility =
++    delivery.channel !== "none"
++      ? resolveHeartbeatVisibility({
++          cfg,
++          channel: delivery.channel,
++          accountId: delivery.accountId,
++        })
++      : { showOk: false, showAlerts: true, useIndicator: true };
++  const { sender } = resolveHeartbeatSenderContext({ cfg, entry, delivery });
++  const responsePrefix = resolveEffectiveMessagesConfig(cfg, agentId, {
++    channel: delivery.channel !== "none" ? delivery.channel : undefined,
++    accountId: delivery.accountId,
++  }).responsePrefix;
++
++  const canRelayToUser = Boolean(
++    delivery.channel !== "none" && delivery.to && visibility.showAlerts,
++  );
++  const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
++  const { prompt, hasExecCompletion, hasCronEvents } = resolveHeartbeatRunPrompt({
++    cfg,
++    heartbeat,
++    preflight: { ...preflight, pendingEventEntries: activeSessionPendingEventEntries },
++    canRelayToUser,
++    workspaceDir,
++    startedAt,
++    heartbeatFileContent: preflight.heartbeatFileContent,
++  });
++
++  if (prompt === null) {
++    const shouldConsumeInspectedEvents =
++      !preflight.isWakeReason && preflight.shouldInspectPendingEvents;
++    if (shouldConsumeInspectedEvents && preflight.pendingEventEntries.length > 0) {
++      consumeSystemEventEntries(sessionKey, preflight.pendingEventEntries);
++    }
++    return { status: "skipped", reason: "no-tasks-due" };
++  }
+   const hasUntrustedInspectedEvents =
+     preflight.shouldInspectPendingEvents &&
+     preflight.pendingEventEntries.some((event) => event.trusted === false);
+diff --git a/src/infra/outbound/targets.ts b/src/infra/outbound/targets.ts
+index 33006fd42a..bac2e1761c 100644
+--- a/src/infra/outbound/targets.ts
++++ b/src/infra/outbound/targets.ts
+@@ -86,9 +86,11 @@ export function resolveHeartbeatDeliveryTarget(params: {
+   entry?: SessionEntry;
+   heartbeat?: AgentDefaultsConfig["heartbeat"];
+   turnSource?: DeliveryContext;
++  forceLastTargetWhenNone?: boolean;
+ }): OutboundTarget {
+   const { cfg, entry } = params;
+   const heartbeat = params.heartbeat ?? cfg.agents?.defaults?.heartbeat;
++  const forceLastTargetWhenNone = params.forceLastTargetWhenNone === true;
+   const rawTarget = heartbeat?.target;
+   let target: HeartbeatTarget = "none";
+   if (rawTarget === "none" || rawTarget === "last") {
+@@ -101,12 +103,19 @@ export function resolveHeartbeatDeliveryTarget(params: {
+   }
+ 
+   if (target === "none") {
+-    const base = resolveSessionDeliveryTarget({ entry });
+-    return buildNoHeartbeatDeliveryTarget({
+-      reason: "target-none",
+-      lastChannel: base.lastChannel,
+-      lastAccountId: base.lastAccountId,
+-    });
++    if (!forceLastTargetWhenNone) {
++      const base = resolveSessionDeliveryTarget({ entry });
++      return buildNoHeartbeatDeliveryTarget({
++        reason: "target-none",
++        lastChannel: base.lastChannel,
++        lastAccountId: base.lastAccountId,
++      });
++    }
++    // For async exec completion events, always fall back to the session's last
++    // delivery target even when heartbeat target is explicitly set to "none".
++    // Ignore explicit to/accountId so stale config fields don't override the
++    // session's true last target (see codex review feedback on PR #50818).
++    target = "last";
+   }
+ 
+   const resolvedTurnSource =
+@@ -114,10 +123,14 @@ export function resolveHeartbeatDeliveryTarget(params: {
+       ? mergeDeliveryContext(params.turnSource, deliveryContextFromSession(entry))
+       : undefined;
+ 
++  // When forced from "none" → "last", ignore heartbeat.to and heartbeat.accountId
++  // so the session's actual last target is used, not a stale configured destination.
++  const forcedToLast = forceLastTargetWhenNone && rawTarget === "none";
++
+   const resolvedTarget = resolveSessionDeliveryTarget({
+     entry,
+     requestedChannel: target === "last" ? "last" : target,
+-    explicitTo: heartbeat?.to,
++    explicitTo: forcedToLast ? undefined : heartbeat?.to,
+     mode: "heartbeat",
+     turnSourceChannel:
+       resolvedTurnSource?.channel && isDeliverableMessageChannel(resolvedTurnSource.channel)
+@@ -133,7 +146,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
+     turnSourceThreadId: params.turnSource?.threadId,
+   });
+ 
+-  const heartbeatAccountId = heartbeat?.accountId?.trim();
++  const heartbeatAccountId = forcedToLast ? undefined : heartbeat?.accountId?.trim();
+   // Use explicit accountId from heartbeat config if provided, otherwise fall back to session
+   let effectiveAccountId = heartbeatAccountId || resolvedTarget.accountId;
+ 
+@@ -187,7 +200,9 @@ export function resolveHeartbeatDeliveryTarget(params: {
+   }
+ 
+   const sessionChatTypeHint =
+-    target === "last" && !heartbeat?.to ? normalizeChatType(entry?.chatType) : undefined;
++    target === "last" && (forcedToLast || !heartbeat?.to)
++      ? normalizeChatType(entry?.chatType)
++      : undefined;
+   const deliveryChatType = resolveHeartbeatDeliveryChatType({
+     channel: resolvedTarget.channel,
+     to: resolved.to,
