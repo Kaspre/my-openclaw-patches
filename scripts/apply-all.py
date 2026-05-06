@@ -60,7 +60,12 @@ PATCHES = [
     # Retired in v2026.4.12: merged upstream (#63480 in v4.10 release notes).
     # Script kept for archaeology.
     # ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
-    ("cli-exit-fix", "apply-cli-exit-fix.py"),
+    # Retired on v2026.4.24 (verified 2026-05-06): PR #70691 (merged 2026-04-23)
+    # added stopAndWait gateway-client teardown which makes our forced
+    # process.exit redundant on the success path. Empirical test: `openclaw
+    # config get gateway.port` exits cleanly in 4s with rc=0 both with and
+    # without our patch. Script kept on disk if regression returns.
+    # ("cli-exit-fix", "apply-cli-exit-fix.py"),
     # Retired on v2026.4.15: upstream added resolveBundledPluginCompatibleLoadValues
     # in activation-context-*.js which plumbs applyPluginAutoEnable + overrides
     # before the plugin registry loads. Our v4.15 probe returns 12 providers
