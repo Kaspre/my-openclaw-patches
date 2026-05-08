@@ -21,7 +21,7 @@ import shutil
 import sys
 
 DIST_DIR_DEFAULT = os.path.expanduser(
-    "~/.nvm/versions/node/v25.8.2/lib/node_modules/openclaw/dist"
+    "~/.nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
 )
 
 BACKUP_SUFFIX = ".bak-heartbeat"
@@ -72,6 +72,32 @@ CHANGE3_NEW = """\tconst delivery = resolveHeartbeatDeliveryTarget({
 \t\tforceLastTargetWhenNone: opts.reason === "exec-event" || (typeof opts.reason === "string" && opts.reason.startsWith("exec:"))
 \t});"""
 
+# v2026.5.7: heartbeat arg restructured with commitmentDeliveryContext ternary (heartbeat-runner-*.js)
+CHANGE3_OLD_V57 = """\tconst delivery = resolveHeartbeatDeliveryTarget({
+\t\tcfg,
+\t\tentry,
+\t\theartbeat: commitmentDeliveryContext ? {
+\t\t\t...heartbeat,
+\t\t\ttarget: "last",
+\t\t\tto: void 0,
+\t\t\taccountId: void 0
+\t\t} : heartbeat,
+\t\tturnSource: commitmentDeliveryContext ? commitmentDeliveryContext : useIsolatedSession ? void 0 : preflight.turnSourceDeliveryContext
+\t});"""
+
+CHANGE3_NEW_V57 = """\tconst delivery = resolveHeartbeatDeliveryTarget({
+\t\tcfg,
+\t\tentry,
+\t\theartbeat: commitmentDeliveryContext ? {
+\t\t\t...heartbeat,
+\t\t\ttarget: "last",
+\t\t\tto: void 0,
+\t\t\taccountId: void 0
+\t\t} : heartbeat,
+\t\tturnSource: commitmentDeliveryContext ? commitmentDeliveryContext : useIsolatedSession ? void 0 : preflight.turnSourceDeliveryContext,
+\t\tforceLastTargetWhenNone: opts.reason === "exec-event" || (typeof opts.reason === "string" && opts.reason.startsWith("exec:"))
+\t});"""
+
 CHANGE3_ALREADY_PATCHED = "forceLastTargetWhenNone: opts.reason"
 
 # ---------------------------------------------------------------------------
@@ -85,6 +111,14 @@ CHANGE4_OLD = """\tif (trimmed === "exec-event") return "exec-event";
 CHANGE4_NEW = """\tif (trimmed === "exec-event") return "exec-event";
 \tif (trimmed.startsWith("exec:")) return "exec-event";
 \tif (trimmed === "wake") return "wake";"""
+
+# v2026.5.7: function moved to heartbeat-runner-*.js; "wake" line now has cron: between exec-event and wake
+CHANGE4_OLD_V57 = """\tif (trimmed === "exec-event") return "exec-event";
+\tif (trimmed.startsWith("cron:")) return "cron";"""
+
+CHANGE4_NEW_V57 = """\tif (trimmed === "exec-event") return "exec-event";
+\tif (trimmed.startsWith("exec:")) return "exec-event";
+\tif (trimmed.startsWith("cron:")) return "cron";"""
 
 CHANGE4_ALREADY_PATCHED = 'trimmed.startsWith("exec:")'
 
@@ -117,26 +151,40 @@ CHANGES = [
         "globs": ["*.js"],
     },
     {
-        "name": "Change 3: pass forceLastTargetWhenNone from runner",
+        # v5.7: call moved to heartbeat-runner-*.js with commitmentDeliveryContext restructure
+        "name": "Change 3: pass forceLastTargetWhenNone from runner (v5.7)",
+        "old": CHANGE3_OLD_V57,
+        "new": CHANGE3_NEW_V57,
+        "marker": CHANGE3_ALREADY_PATCHED,
+        "globs": ["heartbeat-runner-*.js"],
+    },
+    {
+        # pre-v5.7 fallback
+        "name": "Change 3: pass forceLastTargetWhenNone from runner (pre-v5.7)",
         "old": CHANGE3_OLD,
         "new": CHANGE3_NEW,
         "marker": CHANGE3_ALREADY_PATCHED,
         "globs": ["health-*.js", "gateway-cli-*.js"],
     },
     {
-        "name": "Change 4: exec: prefix in resolveHeartbeatReasonKind",
+        # v5.7: function inlined in heartbeat-runner-*.js; cron: line now between exec-event and wake
+        "name": "Change 4: exec: prefix in heartbeat reason kind (v5.7)",
+        "old": CHANGE4_OLD_V57,
+        "new": CHANGE4_NEW_V57,
+        "marker": CHANGE4_ALREADY_PATCHED,
+        "globs": ["heartbeat-runner-*.js"],
+    },
+    {
+        # pre-v5.7 fallback
+        "name": "Change 4: exec: prefix in resolveHeartbeatReasonKind (pre-v5.7)",
         "old": CHANGE4_OLD,
         "new": CHANGE4_NEW,
         "marker": CHANGE4_ALREADY_PATCHED,
         "globs": ["*.js", "plugin-sdk/*.js"],
     },
-    {
-        "name": "Change 5: isExecCompletionEvent expanded matches",
-        "old": CHANGE5_OLD,
-        "new": CHANGE5_NEW,
-        "marker": CHANGE5_ALREADY_PATCHED,
-        "globs": ["health-*.js", "gateway-cli-*.js"],
-    },
+    # Change 5 SUPERSEDED in v5.7: isExecCompletionEvent already uses regex +
+    # STRUCTURED_EXEC_COMPLETION_EVENT_RE which covers all the cases our patch added.
+    # Kept as dead entry so dry-run doesn't report it as "no matching files".
 ]
 
 

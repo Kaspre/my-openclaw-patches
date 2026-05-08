@@ -17,7 +17,7 @@ import shutil
 import sys
 
 DIST_DIR_DEFAULT = os.path.expanduser(
-    "~/.nvm/versions/node/v25.8.2/lib/node_modules/openclaw/dist"
+    "~/.nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
 )
 
 BACKUP_SUFFIX = ".bak-memflush"
@@ -70,6 +70,27 @@ NEW_INCREMENT_V415 = """\t\t\tawait memoryDeps.incrementCompactionCount({
 \t\t\t\tnewSessionId: postCompactionSessionId
 \t\t\t});"""
 
+# v2026.5.7 pattern (memoryDeps wrapper + cfg + newSessionFile)
+OLD_INCREMENT_V57 = """\t\t\tconst nextCount = await memoryDeps.incrementCompactionCount({
+\t\t\t\tcfg: params.cfg,
+\t\t\t\tsessionEntry: activeSessionEntry,
+\t\t\t\tsessionStore: activeSessionStore,
+\t\t\t\tsessionKey: params.sessionKey,
+\t\t\t\tstorePath: params.storePath,
+\t\t\t\tnewSessionId: postCompactionSessionId,
+\t\t\t\tnewSessionFile: postCompactionSessionFile
+\t\t\t});"""
+
+NEW_INCREMENT_V57 = """\t\t\tawait memoryDeps.incrementCompactionCount({
+\t\t\t\tcfg: params.cfg,
+\t\t\t\tsessionEntry: activeSessionEntry,
+\t\t\t\tsessionStore: activeSessionStore,
+\t\t\t\tsessionKey: params.sessionKey,
+\t\t\t\tstorePath: params.storePath,
+\t\t\t\tnewSessionId: postCompactionSessionId,
+\t\t\t\tnewSessionFile: postCompactionSessionFile
+\t\t\t});"""
+
 # The reassignment line to remove (same across versions)
 OLD_REASSIGN = """\t\t\tif (typeof nextCount === "number") memoryFlushCompactionCount = nextCount;"""
 
@@ -86,7 +107,8 @@ NEW_REASSIGN = """\t\t\t// FIX #12590: Do NOT reassign memoryFlushCompactionCoun
 # capture variant needs to be added to this file — partial patches are LOUD,
 # not silent.
 REPLACEMENTS = [
-    # Try v2026.4.15 pattern first (memoryDeps wrapper), then v2026.3.24, then v2026.3.22
+    # Try v2026.5.7 pattern first (memoryDeps + newSessionFile), then v415, v324, v322
+    ("capture", "incrementCompactionCount return capture (v57)", OLD_INCREMENT_V57, NEW_INCREMENT_V57),
     ("capture", "incrementCompactionCount return capture (v415)", OLD_INCREMENT_V415, NEW_INCREMENT_V415),
     ("capture", "incrementCompactionCount return capture (v324)", OLD_INCREMENT_V324, NEW_INCREMENT_V324),
     ("capture", "incrementCompactionCount return capture (v322)", OLD_INCREMENT_V322, OLD_INCREMENT_V322.replace("const nextCount = await", "await")),
