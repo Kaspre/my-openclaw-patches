@@ -5,12 +5,13 @@ Apply all OpenClaw patches in the correct order.
 Usage:
   python3 apply-all.py [--dry-run] [--dist-dir PATH]
 
-Active patches (v2026.4.12):
+Active patches (v2026.4.12 / re-verified 2026.5.10-beta.2):
   1. heartbeat-sessionkey              — exec notification delivery (Changes 2+4 of PR #21682)
   2. memoryflush-fix                   — flush fires every compaction (#12590)
   3. bootstrap-missing-marker-fix      — suppress BOOTSTRAP.md marker (#42542)
   4. plugin-register-skip-on-inspection — skip register() during inspection (#56522)
   5. cli-exit-fix                      — process.exit after CLI completes (#64072 partial)
+  6. plugin-ts-source-discovery-fix    — allow untracked TS-source plugins (PR #80557 / fixes #80503)
 
 On hold:
   - sessions-manage-tool    — programmatic session compact/reset (PR #52422, apply on demand)
@@ -57,6 +58,11 @@ PATCHES = [
     # call site in pi-embedded-*.js). Script kept on disk for archaeology.
     # ("cache-trace-systemprompt-fix", "apply-cache-trace-systemprompt-fix.py"),
     ("plugin-register-skip-on-inspection", "apply-plugin-register-skip-on-inspection.py"),
+    # plugin-ts-source-discovery-fix: local equivalent of PR #80557 (fixes #80503).
+    # Untracked global TS-source plugins (otel-observability, lossless-claw source
+    # checkouts, any future hand-installed dual-manifest extension) get silently
+    # dropped on OC 5.10+ without this patch. Retire once the PR merges upstream.
+    ("plugin-ts-source-discovery-fix", "apply-plugin-ts-source-discovery-fix.py"),
     # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
     # Patch script exists (apply-sessions-manage-tool.py) and was originally
     # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on
