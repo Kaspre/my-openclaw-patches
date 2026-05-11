@@ -57,6 +57,17 @@ PATCHES = [
     # call site in pi-embedded-*.js). Script kept on disk for archaeology.
     # ("cache-trace-systemprompt-fix", "apply-cache-trace-systemprompt-fix.py"),
     ("plugin-register-skip-on-inspection", "apply-plugin-register-skip-on-inspection.py"),
+    # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
+    # Patch script exists (apply-sessions-manage-tool.py) and was originally
+    # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on
+    # beta.2 shows extensive pattern drift: gateway-cli + auth-profiles
+    # target file categories now have 0 matches; multiple within-file
+    # patterns ("pattern not found") in openclaw-tools, docker, method-scopes,
+    # dangerous-tools. The wrapper's Step 9 grep for `sessions_manage` returns
+    # 0 files on beta.2 — tool was not upstream-merged under that name.
+    # Decide: rewrite the patch against current dist structure, OR retire if
+    # the underlying functionality is now provided by a different mechanism.
+    # ("sessions-manage-tool", "apply-sessions-manage-tool.py"),
     # Retired in v2026.4.12: merged upstream (#63480 in v4.10 release notes).
     # Script kept for archaeology.
     # ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
