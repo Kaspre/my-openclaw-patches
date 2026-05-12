@@ -432,12 +432,15 @@ PER_REPLACEMENTS = [
     ),
     # 2. Trailing fallback: only attempt resolvePackageEntrySource for trusted callers; emit
     #    an explicit not-found diagnostic otherwise.
+    # NOTE: beta.5 added `pluginIdHint` to the resolvePackageEntrySource call here.
+    # We preserve it in the trusted branch.
     (
         "\tif (safeEntry.existingSource) return safeEntry.existingSource;\n"
         "\treturn resolvePackageEntrySource({\n"
         "\t\tpackageDir: params.packageDir,\n"
         "\t\t...params.packageRootRealPath !== void 0 ? { packageRootRealPath: params.packageRootRealPath } : {},\n"
         "\t\tentryPath: params.entryPath,\n"
+        "\t\tpluginIdHint: params.pluginIdHint,\n"
         "\t\tsourceLabel: params.sourceLabel,\n"
         "\t\tdiagnostics: params.diagnostics,\n"
         "\t\trejectHardlinks: params.rejectHardlinks\n"
@@ -450,6 +453,7 @@ PER_REPLACEMENTS = [
         "\t\t\tpackageDir: params.packageDir,\n"
         "\t\t\t...params.packageRootRealPath !== void 0 ? { packageRootRealPath: params.packageRootRealPath } : {},\n"
         "\t\t\tentryPath: params.entryPath,\n"
+        "\t\t\tpluginIdHint: params.pluginIdHint,\n"
         "\t\t\tsourceLabel: params.sourceLabel,\n"
         "\t\t\tdiagnostics: params.diagnostics,\n"
         "\t\t\trejectHardlinks: params.rejectHardlinks\n"

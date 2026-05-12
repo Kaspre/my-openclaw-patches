@@ -5,13 +5,19 @@ Apply all OpenClaw patches in the correct order.
 Usage:
   python3 apply-all.py [--dry-run] [--dist-dir PATH]
 
-Active patches (v2026.4.12 / re-verified 2026.5.10-beta.2):
+Active patches (re-verified 2026.5.10-beta.5):
   1. heartbeat-sessionkey              — exec notification delivery (Changes 2+4 of PR #21682)
-  2. memoryflush-fix                   — flush fires every compaction (#12590)
+  2. memoryflush-fix                   — UPSTREAM-MERGED PR #51421 (2026-05-08), no-op now
   3. bootstrap-missing-marker-fix      — suppress BOOTSTRAP.md marker (#42542)
   4. plugin-register-skip-on-inspection — skip register() during inspection (#56522)
-  5. cli-exit-fix                      — process.exit after CLI completes (#64072 partial)
-  6. plugin-ts-source-discovery-fix    — allow untracked TS-source plugins (PR #80557 / fixes #80503)
+  5. cli-exit-fix                      — RETIRED on v2026.4.24+ (#70691)
+  6. plugin-ts-source-discovery-fix    — local equivalent of PR #80557 (still OPEN); fixes #80503
+
+Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
+  - v-prefix verify rollback (#74069 → PR #80480)
+  - TimeoutStartSec clobber by doctor (#80462 → PR #80485)
+  - plugins.deny stale-id fatal (#77802 → PR #80471)
+  All three behaviors landed in beta.4+. Wrapper logic kept; idempotent re-runs are safe.
 
 On hold:
   - sessions-manage-tool    — programmatic session compact/reset (PR #52422, apply on demand)
@@ -63,6 +69,13 @@ PATCHES = [
     # checkouts, any future hand-installed dual-manifest extension) get silently
     # dropped on OC 5.10+ without this patch. Retire once the PR merges upstream.
     ("plugin-ts-source-discovery-fix", "apply-plugin-ts-source-discovery-fix.py"),
+    # plugin-metadata-snapshot-memo (2026-05-11): in-process memo of
+    # loadPluginMetadataSnapshot. CLI bootstrap calls this ~5x per invocation,
+    # each rebuilding the same ~16s snapshot. With memo: openclaw plugins list
+    # drops from ~91s → ~7s (~13× speedup); gateway status drops from ~77s → ~19s.
+    # No-op for already-fast paths (--version/--help). Findings doc:
+    # workspace/docs/findings/2026-05-11-cli-startup-perf-investigation.md
+    ("plugin-metadata-snapshot-memo", "apply-plugin-metadata-snapshot-memo.py"),
     # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
     # Patch script exists (apply-sessions-manage-tool.py) and was originally
     # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on
