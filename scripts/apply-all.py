@@ -5,13 +5,14 @@ Apply all OpenClaw patches in the correct order.
 Usage:
   python3 apply-all.py [--dry-run] [--dist-dir PATH]
 
-Active patches (re-verified 2026.5.10-beta.5):
-  1. heartbeat-sessionkey              — exec notification delivery (Changes 2+4 of PR #21682)
-  2. memoryflush-fix                   — UPSTREAM-MERGED PR #51421 (2026-05-08), no-op now
-  3. bootstrap-missing-marker-fix      — suppress BOOTSTRAP.md marker (#42542)
-  4. plugin-register-skip-on-inspection — skip register() during inspection (#56522)
-  5. cli-exit-fix                      — RETIRED on v2026.4.24+ (#70691)
-  6. plugin-ts-source-discovery-fix    — local equivalent of PR #80557 (still OPEN); fixes #80503
+Active patches (re-verified 2026.5.12-beta.2):
+  1. heartbeat-sessionkey              — partial upstream coverage; PR #80214 covers Change 4 only (Changes 1/2/3 still apply to 3 files)
+  2. bootstrap-missing-marker-fix      — suppress BOOTSTRAP.md marker (third-party PR #42542 still OPEN)
+  3. plugin-register-skip-on-inspection — partial upstream coverage; issue #56522 fix covers config schema path only (different loader surface still applies)
+  4. cli-exit-fix                      — process.exit + SIGKILL-fallback on runLegacyCliEntry resolve; fixes `agent --local` post-session hang (TECH-2026-2946); plain process.exit gets preempted by ref'd handles from LCM/otel/plugin background loops
+  5. plugin-metadata-snapshot-memo     — CLI bootstrap memo of loadPluginMetadataSnapshot (no upstream PR)
+  6. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #7)
+  7. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -21,6 +22,14 @@ Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED
 
 On hold:
   - sessions-manage-tool    — programmatic session compact/reset (PR #52422, apply on demand)
+
+Retired on v2026.5.12-beta.2:
+  - memoryflush-fix                    — our PR #51421 merged 2026-05-08 by Kaspre (dry-run finds no targets)
+  - plugin-ts-source-discovery-fix     — our PR #80557 merged 2026-05-12 by Kaspre (dry-run: pattern_not_found + already-patched)
+
+Partially upstream-merged in v2026.5.12-beta.2 (still load-bearing):
+  - heartbeat-sessionkey               — PR #80214 (merged 2026-05-11) covers Change 4 only; Changes 1/2/3 still apply
+  - plugin-register-skip-on-inspection — issue #56522 closed 2026-04-25 addressed config.get/config.schema; loader.*.js surface still applies
 
 Retired on v2026.4.12:
   - cron-duplicate-fix      — superseded upstream (previousRunAtMs guard + #63507)
@@ -47,8 +56,15 @@ import sys
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 PATCHES = [
+    # heartbeat-sessionkey — partially upstream-merged in v2026.5.12-beta.2.
+    # PR #21682 → #50818 → #80214 (merged 2026-05-11 by Kaspre, commit
+    # 7eefb26bc8d8) covers Change 4 (exec: prefix in resolveHeartbeatReasonKind)
+    # which dry-runs as "no matching files found". Changes 1/2/3 still apply
+    # (3 files patched on beta.2). Revisit once remaining changes upstream.
     ("heartbeat-sessionkey", "apply-heartbeat-sessionkey-fix.py"),
-    ("memoryflush-fix", "apply-memoryflush-fix.py"),
+    # Retired on v2026.5.12-beta.2: PR #51421 merged 2026-05-08 by Kaspre.
+    # Script kept on disk for archaeology.
+    # ("memoryflush-fix", "apply-memoryflush-fix.py"),
     # Retired in v2026.4.9: PR #44646 landed upstream. All 5 loglevel issues
     # (inverted mapping, <= file/console comparisons, child logger minLevel
     # inheritance, sub-logger minLevel propagation) are fixed in v4.9 bundles.
@@ -63,12 +79,19 @@ PATCHES = [
     # fallback read `context.systemPrompt ?? context.system` at the recordStage
     # call site in pi-embedded-*.js). Script kept on disk for archaeology.
     # ("cache-trace-systemprompt-fix", "apply-cache-trace-systemprompt-fix.py"),
+    # plugin-register-skip-on-inspection — partially upstream-fixed in
+    # v2026.5.12-beta.2. Issue #56522 closed 2026-04-25 by steipete (commit
+    # fc5920fb5134) addresses the config.get / config.schema schema-loading
+    # paths, but our patch targets a different loader.*.js surface that
+    # still dry-runs as "would patch loader-*.js". Keep applying until the
+    # remaining surface lands upstream.
     ("plugin-register-skip-on-inspection", "apply-plugin-register-skip-on-inspection.py"),
-    # plugin-ts-source-discovery-fix: local equivalent of PR #80557 (fixes #80503).
-    # Untracked global TS-source plugins (otel-observability, lossless-claw source
-    # checkouts, any future hand-installed dual-manifest extension) get silently
-    # dropped on OC 5.10+ without this patch. Retire once the PR merges upstream.
-    ("plugin-ts-source-discovery-fix", "apply-plugin-ts-source-discovery-fix.py"),
+    # Retired on v2026.5.12-beta.2: PR #80557 merged 2026-05-12 by Kaspre.
+    # Was local equivalent fixing #80503 (untracked global TS-source plugins —
+    # otel-observability, lossless-claw source checkouts, hand-installed
+    # dual-manifest extensions — silently dropped on OC 5.10+). Script kept
+    # on disk; re-enable here if dry-run shows the fix didn't land.
+    # ("plugin-ts-source-discovery-fix", "apply-plugin-ts-source-discovery-fix.py"),
     # plugin-metadata-snapshot-memo (2026-05-11): in-process memo of
     # loadPluginMetadataSnapshot. CLI bootstrap calls this ~5x per invocation,
     # each rebuilding the same ~16s snapshot. With memo: openclaw plugins list
@@ -76,6 +99,21 @@ PATCHES = [
     # No-op for already-fast paths (--version/--help). Findings doc:
     # workspace/docs/findings/2026-05-11-cli-startup-perf-investigation.md
     ("plugin-metadata-snapshot-memo", "apply-plugin-metadata-snapshot-memo.py"),
+    # web-search-onstartup (2026-05-12): flip exa/firecrawl plugin manifests
+    # to activation.onStartup=true. Originally hypothesized to fix the
+    # web_search-disabled issue but later proved INSUFFICIENT — see
+    # passive-plugin-hook-injection below. Kept because it costs nothing
+    # and may help other downstream consumers of the manifest flag.
+    ("web-search-onstartup", "apply-web-search-onstartup.py"),
+    # passive-plugin-hook-injection (2026-05-12): inject a no-op
+    # `api.on("before_agent_start", () => {})` into the register(api) body of
+    # exa/firecrawl. `agent --local` forks filter plugins by activation
+    # trigger; the "manifest-hook-owner" trigger requires the plugin to have
+    # registered at least one hook at runtime. Passive providers (only
+    # api.registerWebSearchProvider) declare no hooks → no trigger → not
+    # loaded in --local. The no-op hook gives them an activation trigger
+    # without changing behavior. See investigation notes in the script.
+    ("passive-plugin-hook-injection", "apply-passive-plugin-hook-injection.py"),
     # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
     # Patch script exists (apply-sessions-manage-tool.py) and was originally
     # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on
@@ -90,12 +128,16 @@ PATCHES = [
     # Retired in v2026.4.12: merged upstream (#63480 in v4.10 release notes).
     # Script kept for archaeology.
     # ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
-    # Retired on v2026.4.24 (verified 2026-05-06): PR #70691 (merged 2026-04-23)
-    # added stopAndWait gateway-client teardown which makes our forced
-    # process.exit redundant on the success path. Empirical test: `openclaw
-    # config get gateway.port` exits cleanly in 4s with rc=0 both with and
-    # without our patch. Script kept on disk if regression returns.
-    # ("cli-exit-fix", "apply-cli-exit-fix.py"),
+    # cli-exit-fix — RE-ENABLED on v2026.5.12-beta.2 (2026-05-12). Retired
+    # 2026-05-06 validation only covered `openclaw config get` (upstream
+    # stopAndWait via PR #70691 fixed that path). `openclaw agent --local`
+    # still hangs post-session-end (TECH-2026-2946/2947), causing RC backlog
+    # burn iterations to consume the full 60min ITER_TIMEOUT when real work
+    # completes in ~20min. This patch's forced process.exit on the success
+    # path overrides whatever plugin background handle is pinning the loop.
+    # Original entry.js half was dropped — upstream refactored to await form
+    # (and the original replace had a `process$1` regex typo anyway).
+    ("cli-exit-fix", "apply-cli-exit-fix.py"),
     # Retired on v2026.4.15: upstream added resolveBundledPluginCompatibleLoadValues
     # in activation-context-*.js which plumbs applyPluginAutoEnable + overrides
     # before the plugin registry loads. Our v4.15 probe returns 12 providers
