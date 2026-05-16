@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-apply-skip-clone-for-policies-fastpath.py — durable mitigation for OC 2026.5.16-beta.2
-residual `agent --local` hang caused by structuredClone-on-cache-hit hot path.
+apply-clone-storm-fix.py — durable mitigation for OC 2026.5.16-beta.2
+"clone-storm": N×structuredClone of the cached plugin-metadata snapshot
+per agent dispatch.
 
 PROBLEM (companion to apply-snapshot-memo-multislot.py and PR #82619):
 
@@ -17,8 +18,9 @@ PROBLEM (companion to apply-snapshot-memo-multislot.py and PR #82619):
   loadManifestModelIdNormalizationPolicies(params), which calls
   resolveMetadataSnapshotForPolicies(params), which calls
   loadPluginMetadataSnapshot — triggering a full structuredClone per
-  iteration. CPU sampling confirms ~70% of agent-dispatch wall time is in
-  clonePluginManifestRecord/cloneSnapshotValue.
+  iteration. That's the "clone-storm" — one lookup amplifies to N JS
+  deep-clones. CPU sampling confirms ~70% of agent-dispatch wall time is
+  in clonePluginManifestRecord/cloneSnapshotValue.
 
   Before-patch: agent --local hangs to Layer 2 SIGKILL (timeout + 30s).
   After-patch: agent --local completes (PONG response observed in
@@ -58,7 +60,7 @@ PAIRED set; retire together):
      and investigate.
   3. With both patches still applied + clean smoke matrix, dry-run remove:
        python3 apply-snapshot-memo-multislot.py --dry-run
-       python3 apply-skip-clone-for-policies-fastpath.py --dry-run
+       python3 apply-clone-storm-fix.py --dry-run
      Confirm both still recognize their APPLIED_MARKER.
   4. Move BOTH patch scripts from apply-all.py active list to the
      "Retired" section in the apply-all.py docstring.
@@ -70,7 +72,7 @@ PAIRED set; retire together):
   load-bearing on beta.2 until upstream covers both layers.
 
 Usage:
-  python3 apply-skip-clone-for-policies-fastpath.py [--dry-run] [--dist-dir PATH]
+  python3 apply-clone-storm-fix.py [--dry-run] [--dist-dir PATH]
 """
 
 from __future__ import annotations
@@ -85,7 +87,7 @@ DIST_DIR_DEFAULT = os.path.expanduser(
     "~/.nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
 )
 
-BACKUP_SUFFIX = ".bak-skip-clone-for-policies-fastpath"
+BACKUP_SUFFIX = ".bak-clone-storm-fix"
 
 # Content-addressed glob — survives bundle-hash churn across OC releases.
 FILE_GLOB = "model-ref-shared-*.js"
@@ -110,7 +112,7 @@ OLD = (
 )
 
 NEW = (
-    "// LOCAL PATCH (skip-clone-for-policies-fastpath): cache the resolved policies on a\n"
+    "// LOCAL PATCH (clone-storm-fix): cache the resolved policies on a\n"
     "// params-derived key BEFORE calling resolveMetadataSnapshotForPolicies (which is what\n"
     "// triggers clonePluginMetadataSnapshot / structuredClone on every call). On agent --local\n"
     "// dispatch, buildModelAliasIndex iterates over all configured models — each iteration\n"

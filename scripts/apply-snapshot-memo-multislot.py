@@ -37,21 +37,22 @@ calls in 8s went from 0 hits / 99 misses to ~179 hits / 3 misses (98.4% hit
 rate). plugins list --json went from 25s timeout to 7.5-8.4s clean exit. All
 five smoke-matrix CLI subcommands recovered.
 
-RETIREMENT CRITERION (this patch + apply-skip-clone-for-policies-fastpath.py
-are a PAIRED set; retire together):
+RETIREMENT CRITERION (this patch + apply-clone-storm-fix.py are a
+PAIRED set; retire together):
 
   This patch fixes the SOURCE of cache thrashing (single-slot memo can't
   hold alternating workspaceDir keys → 100% miss rate → rebuild loop).
-  The paired skip-clone patch fixes the COST of the cache hit
-  (structuredClone of the cached snapshot on every hit).
+  The paired clone-storm-fix patch fixes the COST of the cache hit
+  (structuredClone of the cached snapshot on every hit, amplified by
+  buildModelAliasIndex iterating N model aliases per agent dispatch).
 
   Both are load-bearing on beta.2 until upstream covers both layers.
   Maintainer Shakker (2026-05-16) is targeting the hot-path / caller layer
   rather than the cache layer — when his fix ships, both of our patches
   may become unnecessary together.
 
-  Retirement steps: see RETIREMENT CRITERION in
-  apply-skip-clone-for-policies-fastpath.py — same process for both.
+  Retirement steps: see RETIREMENT CRITERION in apply-clone-storm-fix.py
+  — same process for both.
 
 Usage:
   python3 apply-snapshot-memo-multislot.py [--dry-run] [--dist-dir PATH]
