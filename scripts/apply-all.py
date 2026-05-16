@@ -138,6 +138,13 @@ PATCHES = [
     # Original entry.js half was dropped — upstream refactored to await form
     # (and the original replace had a `process$1` regex typo anyway).
     ("cli-exit-fix", "apply-cli-exit-fix.py"),
+    # Local mirror of openclaw#82403 (merged 2026-05-16T11:13:55Z, commit
+    # f50c65f12454, NOT in v2026.5.16-beta.2 which was cut from a pre-merge
+    # commit). Releases Codex raw assistant completions when turn/completed is
+    # missing — closes the dominant cause of `openclaw agent --local` zombie
+    # processes that #71710 tracks. Retire this entry once an OC release that
+    # bundles #82403 (likely 5.16-beta.3 or later) is installed.
+    ("codex-raw-completion-fix", "apply-codex-raw-completion-fix.py"),
     # Retired on v2026.4.15: upstream added resolveBundledPluginCompatibleLoadValues
     # in activation-context-*.js which plumbs applyPluginAutoEnable + overrides
     # before the plugin registry loads. Our v4.15 probe returns 12 providers

@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
 """
-Patch: in-process memoization of loadPluginMetadataSnapshot.
+RETIRED 2026-05-16 on v2026.5.16-beta.2.
 
-Why:
-  V8 cpu-prof of `openclaw plugins list` (91s wall, 100% CPU) shows
-  loadPluginMetadataSnapshot is called 5 times per CLI invocation,
-  each doing ~16-17s of work building the same snapshot. Lower-level
-  caches (manifestMetadataCache in manifest-metadata-scan) don't dedup
-  these because the 5 callers reach loadPluginMetadataSnapshot via
-  different paths that each rebuild the upper-layer snapshot wrapper
-  (registry, owner-maps, fingerprints) before the lower cache helps.
+Upstream landed the same memoization pattern natively:
+  - dist/plugin-metadata-snapshot-REEM32Mm.js (or successor content-hash):
+    module-level `pluginMetadataSnapshotMemo` variable + check on line ~700
+    + assignment on line ~727 inside loadPluginMetadataSnapshot.
+  - Exports `clearLoadPluginMetadataSnapshotMemo` for explicit invalidation.
+  - `canMemoizePluginMetadataSnapshotResult` gates which results get cached.
 
-  This patch memoizes at the snapshot level. Single-slot cache, keyed
-  by a JSON fingerprint of (config, env, workspaceDir, stateDir,
-  preferPersisted, index). process.env is normalized to a sentinel
-  to avoid expensive Object.entries on every call.
+The native memo matches our patch's behavior for the 5-calls-per-startup
+hot path (single-slot, key-fingerprint, clone-on-hit). Both versions are
+process-scoped, so neither helps the cross-process `agent --local` cold-start
+cost — if that becomes a priority, a file-cache approach is needed (much
+bigger change than a snapshot-memo patch).
 
-  Uses a globalThis singleton (matching apply-plugin-cache-global.py
-  precedent) so duplicated bundler chunks share the cache.
+Original anchors below are preserved for reference / re-enabling if upstream
+ever rolls back. To re-enable, restore the original docstring (replace this
+block with the original "Patch: in-process memoization..." text) and the
+patch will work against any bundle still matching OLD_FN_ANCHOR.
 
-Expected impact:
-  5 calls × ~16s -> 1 call × ~16s + 4 trivial cache hits.
-  Wall-clock target: 91s -> ~30-40s on `openclaw plugins list`.
+Behavior on retired versions: this script now reports
+'upstream-native-memo' for files where the native memo is present and exits
+0 (success, no-op). Falls back to old apply-or-fail logic for any file where
+the native memo signature is absent (defensive — covers downgrade/rollback).
 
-Idempotent. Re-runnable. Fail-loud if anchors don't match.
+Original purpose (preserved):
+  V8 cpu-prof of `openclaw plugins list` (91s wall, 100% CPU) showed
+  loadPluginMetadataSnapshot called 5 times per CLI invocation, each ~16s
+  of work building the same snapshot. Patch memoized at snapshot level.
 
 Usage:
   python3 apply-plugin-metadata-snapshot-memo.py [--dry-run] [--dist-dir PATH]
@@ -102,6 +107,11 @@ NEW_FN_REPLACEMENT = (
 # Marker used to detect already-patched files (idempotence check)
 APPLIED_MARKER = "__ocPluginMetadataSnapshotMemo"
 
+# Upstream native memo signatures (added 2026.5.16-beta.2). When present,
+# our patch is redundant — report no-op success instead of fail.
+NATIVE_MEMO_SIGNATURE = "pluginMetadataSnapshotMemo"
+NATIVE_MEMO_CLEAR_EXPORT = "clearLoadPluginMetadataSnapshotMemo"
+
 
 def find_targets(dist_dir: str) -> list[str]:
     pattern = os.path.join(dist_dir, FILE_GLOB)
@@ -110,7 +120,8 @@ def find_targets(dist_dir: str) -> list[str]:
 
 
 def patch_file(path: str, dry_run: bool) -> str:
-    """Return one of: 'applied', 'already-applied', 'no-match', 'error:<reason>'."""
+    """Return one of: 'applied', 'already-applied', 'upstream-native-memo',
+    'no-match', 'error:<reason>'."""
     try:
         with open(path, encoding="utf-8") as f:
             content = f.read()
@@ -119,6 +130,16 @@ def patch_file(path: str, dry_run: bool) -> str:
 
     if APPLIED_MARKER in content:
         return "already-applied"
+
+    # Upstream native memo present? (Both signatures required to avoid
+    # false-positive on re-export proxy bundles like plugin-metadata-snapshot-CyffEZ4Z.js
+    # which only contain the symbol re-export, not the implementation.)
+    if (
+        NATIVE_MEMO_SIGNATURE in content
+        and NATIVE_MEMO_CLEAR_EXPORT in content
+        and "function loadPluginMetadataSnapshot" in content
+    ):
+        return "upstream-native-memo"
 
     if OLD_FN_ANCHOR not in content:
         return "no-match"
@@ -160,14 +181,15 @@ def main() -> int:
 
     applied = sum(1 for r in results.values() if r == "applied")
     already = sum(1 for r in results.values() if r == "already-applied")
+    upstream = sum(1 for r in results.values() if r == "upstream-native-memo")
     no_match = sum(1 for r in results.values() if r == "no-match")
     errors = [(p, r) for p, r in results.items() if r.startswith("error")]
 
     for p, r in results.items():
-        print(f"  {r:20s} {os.path.basename(p)}")
+        print(f"  {r:22s} {os.path.basename(p)}")
 
     print(
-        f"\nSummary: applied={applied} already-applied={already} no-match={no_match} errors={len(errors)} (dry-run={args.dry_run})"
+        f"\nSummary: applied={applied} already-applied={already} upstream-native-memo={upstream} no-match={no_match} errors={len(errors)} (dry-run={args.dry_run})"
     )
 
     if errors:
@@ -175,9 +197,22 @@ def main() -> int:
             print(f"  ERROR: {p}: {r}", file=sys.stderr)
         return 2
 
+    # On v2026.5.16-beta.2+, the implementation bundle has native memo and the
+    # proxy bundle (re-export only) has no `function loadPluginMetadataSnapshot`.
+    # Both outcomes are valid no-op: if ANY bundle reports upstream-native-memo,
+    # the patch is retired-correctly. Proxy `no-match` files are expected here.
+    if upstream > 0:
+        if applied == 0 and already == 0:
+            print("OK: upstream native memo present, patch retired (no-op).")
+        return 0
+
     if applied == 0 and already == 0:
         print(
-            "FAIL: no target file matched the expected function body. Upstream may have refactored loadPluginMetadataSnapshot.",
+            "FAIL: no target file matched the expected function body, "
+            "and no upstream native memo detected. Upstream may have refactored "
+            "loadPluginMetadataSnapshot in a way this script doesn't recognize. "
+            "Re-validate by inspecting plugin-metadata-snapshot-*.js for the "
+            "loadPluginMetadataSnapshot function shape.",
             file=sys.stderr,
         )
         return 2
