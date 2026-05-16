@@ -13,6 +13,8 @@ Active patches (re-verified 2026.5.12-beta.2):
   5. plugin-metadata-snapshot-memo     — CLI bootstrap memo of loadPluginMetadataSnapshot (no upstream PR)
   6. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #7)
   7. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
+  8. snapshot-memo-multislot           — bounded-LRU Map memo + broader cache eligibility for derived stale-source; fixes beta.2 CLI bootstrap plugin-walk loop where single-slot memo couldn't hold alternating memoKeys (workspaceDir set vs null). Mirrors upstream PR #82619 (in flight).
+  9. codex-raw-completion-fix          — local mirror of openclaw#82403, retire when upstream ships
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -99,6 +101,18 @@ PATCHES = [
     # No-op for already-fast paths (--version/--help). Findings doc:
     # workspace/docs/findings/2026-05-11-cli-startup-perf-investigation.md
     ("plugin-metadata-snapshot-memo", "apply-plugin-metadata-snapshot-memo.py"),
+    # snapshot-memo-multislot (2026-05-16): bounded-LRU Map memo at the snapshot
+    # level + broader cache eligibility for derived persisted-registry-stale-source
+    # diagnostics. Fixes the beta.2 CLI bootstrap plugin-walk loop where a single-slot
+    # memo couldn't hold two alternating memoKeys (workspaceDir set vs null from
+    # different bootstrap callers), causing every call to miss and rebuild.
+    # Validated on beta.2 (dba00cb): plugins list 25s timeout → 7.5-8.4s clean.
+    # See workspace/docs/findings/2026-05-16-oc-beta2-cli-bootstrap-plugin-walk-loop.md
+    # and upstream PR #82619 (in flight). Retire when upstream lands the fix.
+    # The older plugin-metadata-snapshot-memo entry above is a different,
+    # less-complete approach and stays in place as a no-op (its APPLIED_MARKER check
+    # short-circuits on the upstream native memo, which is present in this patch).
+    ("snapshot-memo-multislot", "apply-snapshot-memo-multislot.py"),
     # web-search-onstartup (2026-05-12): flip exa/firecrawl plugin manifests
     # to activation.onStartup=true. Originally hypothesized to fix the
     # web_search-disabled issue but later proved INSUFFICIENT — see
