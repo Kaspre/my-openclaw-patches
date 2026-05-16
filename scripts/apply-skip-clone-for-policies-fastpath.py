@@ -38,11 +38,36 @@ FIX (this patch):
   Worst case (alternating params): degenerate to unpatched behavior.
 
 UPSTREAM:
-  - Maintainer Shakker indicated 2026-05-16 that a fix is in progress for
-    a regression introduced after OC 5.7. May or may not be the same bug
-    or same fix layer. Retire this patch when upstream lands.
+  - Maintainer Shakker (2026-05-16 12:41 PM Discord): "My approach is not
+    to introduce another cache but resolve hot paths that caused this
+    regression in the first place." So his fix targets the CALLER (likely
+    buildModelAliasIndex doing one snapshot fetch instead of N), not the
+    cache layer. The two approaches are compatible — if Shakker reduces
+    the call count, our cache simply never gets hit beyond the first call.
   - Our companion findings doc:
     workspace/docs/findings/2026-05-16-oc-beta2-cli-bootstrap-plugin-walk-loop.md
+
+RETIREMENT CRITERION (this patch + apply-snapshot-memo-multislot.py are a
+PAIRED set; retire together):
+
+  1. Install the OC release that bundles Shakker's hot-path fix.
+  2. Run regression smoke matrix WITH both patches still applied:
+       /home/captain/.openclaw/workspace/scripts/regression-test.sh (or
+       equivalent — agent --local + 5 CLI subcommands).
+     All must complete cleanly. If anything regresses, KEEP the patches
+     and investigate.
+  3. With both patches still applied + clean smoke matrix, dry-run remove:
+       python3 apply-snapshot-memo-multislot.py --dry-run
+       python3 apply-skip-clone-for-policies-fastpath.py --dry-run
+     Confirm both still recognize their APPLIED_MARKER.
+  4. Move BOTH patch scripts from apply-all.py active list to the
+     "Retired" section in the apply-all.py docstring.
+  5. Restore each file from its .bak-* backup, OR re-run `openclaw update`
+     to pull a clean upstream dist.
+
+  Do NOT retire piecemeal. snapshot-memo-multislot fixes the SOURCE of
+  cache thrashing; this patch fixes the COST of the cache hit. Both are
+  load-bearing on beta.2 until upstream covers both layers.
 
 Usage:
   python3 apply-skip-clone-for-policies-fastpath.py [--dry-run] [--dist-dir PATH]

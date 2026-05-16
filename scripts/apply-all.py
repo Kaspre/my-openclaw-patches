@@ -122,8 +122,13 @@ PATCHES = [
     # that short-circuits BEFORE resolveMetadataSnapshotForPolicies → snapshot fetch +
     # clone. Validated: agent --local eval-1 hang → 52.5s + PONG response on a
     # heavily-loaded test system; CLI subcommands also see 30-60% speedups.
-    # Maintainer Shakker indicated a fix is in progress for a regression since 5.7
-    # (2026-05-16 12:05 PM); cross-check his PR and retire this when it lands.
+    #
+    # RETIREMENT (paired with snapshot-memo-multislot above): retire BOTH together
+    # when Shakker's upstream fix ships and a smoke-matrix-with-both-still-applied
+    # test passes clean. Shakker (2026-05-16 Discord) is targeting the hot-path /
+    # caller layer (not adding another cache), so his fix may obviate both ours.
+    # See RETIREMENT CRITERION in apply-skip-clone-for-policies-fastpath.py for
+    # the full step-by-step process.
     ("skip-clone-for-policies-fastpath", "apply-skip-clone-for-policies-fastpath.py"),
     # web-search-onstartup (2026-05-12): flip exa/firecrawl plugin manifests
     # to activation.onStartup=true. Originally hypothesized to fix the
