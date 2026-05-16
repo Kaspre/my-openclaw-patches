@@ -35,40 +35,58 @@ DIST_DIR = Path.home() / ".nvm/versions/node/v26.1.0/lib/node_modules/openclaw/d
 
 # Layer 2 — hard wall-clock SIGKILL timer for `agent` invocations.
 # Inlined as a single-line IIFE for clean string-replace insertion.
-HARD_TIMER_IIFE = (
-    "(()=>{try{const a=process.argv;"
-    "const sub=a.find((v,i)=>i>=2&&!v.startsWith('-'));"
-    "if(sub!=='agent')return;"
-    "const ti=a.indexOf('--timeout');"
-    "let s=600;"
-    "if(ti>=0&&a[ti+1]){const p=parseInt(a[ti+1],10);"
-    "if(Number.isFinite(p)&&p>=0)s=p;}"
-    "if(s<=0)return;"
-    "const ms=s*1000+30000;"
-    "const t=setTimeout(()=>{try{console.error(`[openclaw] cli-exit-fix: hard wall-clock SIGKILL after ${ms/1000}s (timeout=${s}s + 30s grace)`);}catch{}"
-    "try{process.kill(process.pid,'SIGKILL');}catch{}},ms);"
-    "t.unref&&t.unref();}catch{}})();"
-)
+# Two variants: one for files using `process`, one for files using `process$1` (entry.js bundled name).
+def _hard_timer_iife(proc_var: str) -> str:
+    return (
+        "(()=>{try{const a=" + proc_var + ".argv;"
+        "const sub=a.find((v,i)=>i>=2&&!v.startsWith('-'));"
+        "if(sub!=='agent')return;"
+        "const ti=a.indexOf('--timeout');"
+        "let s=600;"
+        "if(ti>=0&&a[ti+1]){const p=parseInt(a[ti+1],10);"
+        "if(Number.isFinite(p)&&p>=0)s=p;}"
+        "if(s<=0)return;"
+        "const ms=s*1000+30000;"
+        "const t=setTimeout(()=>{try{console.error(`[openclaw] cli-exit-fix: hard wall-clock SIGKILL after ${ms/1000}s (timeout=${s}s + 30s grace)`);}catch{}"
+        "try{" + proc_var + ".kill(" + proc_var + ".pid,'SIGKILL');}catch{}},ms);"
+        "t.unref&&t.unref();}catch{}})();"
+    )
+
+HARD_TIMER_IIFE = _hard_timer_iife("process")
+HARD_TIMER_IIFE_P1 = _hard_timer_iife("process$1")  # entry.js bundles process as process$1
 
 PATCHES = [
+    # === dist/index.js (legacy library-mode CLI; harmless if never main) ===
     {
         "file": "index.js",
         "description": "index.js: process.exit + SIGKILL fallback after runLegacyCliEntry resolves",
-        # The .then() fires when the agent session ends, but process.exit() can be preempted
-        # by ref'd handles from LCM compaction / otel exporter / plugin background loops,
-        # causing agent --local to hang 60min until external SIGKILL. The setTimeout fallback
-        # signals SIGKILL to self if process.exit hasn't taken effect within 3s.
         "search": "runLegacyCliEntry(process.argv).catch(",
         "replace": "runLegacyCliEntry(process.argv).then(() => { setTimeout(() => { try { process.kill(process.pid, 'SIGKILL'); } catch {} }, 3000); process.exit(process.exitCode ?? 0); }).catch(",
     },
     {
         "file": "index.js",
-        "description": "index.js: hard wall-clock SIGKILL timer for `agent` invocations (--timeout aware, 10min default)",
-        # MUST run AFTER the .then() patch above — searches for the patched .then(...) form.
-        # The hard timer fires regardless of whether runLegacyCliEntry's promise resolves,
-        # so it covers the "agent runtime hangs forever" case that Layer 1 misses.
+        "description": "index.js: hard wall-clock SIGKILL timer for `agent` invocations (--timeout aware)",
         "search": "runLegacyCliEntry(process.argv).then(() =>",
         "replace": HARD_TIMER_IIFE + "runLegacyCliEntry(process.argv).then(() =>",
+    },
+    # === dist/entry.js (the ACTUAL CLI entry per openclaw.mjs `tryImport("./dist/entry.js")`) ===
+    # This is where `openclaw agent --local` really runs. Patches on index.js are dormant
+    # for the CLI hot path; entry.js is what matters.
+    {
+        "file": "entry.js",
+        "description": "entry.js: hard wall-clock SIGKILL timer + post-resolve SIGKILL around runMainOrRootHelp",
+        # The whole inline `if (...) await runMainOrRootHelp(...)` is replaced. We:
+        #   (1) Run the IIFE BEFORE the dispatch so Layer 2 timer is scheduled early
+        #   (2) Convert the bare-statement form to a block + post-resolve cleanup (Layer 1)
+        "search": "if (!tryHandleRootVersionFastPath(process$1.argv)) await runMainOrRootHelp(process$1.argv);",
+        "replace": (
+            HARD_TIMER_IIFE_P1
+            + "if (!tryHandleRootVersionFastPath(process$1.argv)) { "
+            + "await runMainOrRootHelp(process$1.argv); "
+            + "setTimeout(() => { try { process$1.kill(process$1.pid, 'SIGKILL'); } catch {} }, 3000); "
+            + "process$1.exit(process$1.exitCode ?? 0); "
+            + "}"
+        ),
     },
 ]
 
