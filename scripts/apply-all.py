@@ -14,7 +14,8 @@ Active patches (re-verified 2026.5.12-beta.2):
   6. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #7)
   7. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
   8. snapshot-memo-multislot           — bounded-LRU Map memo + broader cache eligibility for derived stale-source; fixes beta.2 CLI bootstrap plugin-walk loop where single-slot memo couldn't hold alternating memoKeys (workspaceDir set vs null). Mirrors upstream PR #82619 (in flight).
-  9. codex-raw-completion-fix          — local mirror of openclaw#82403, retire when upstream ships
+  9. skip-clone-for-policies-fastpath  — second-order fix exposed by #82619: params-keyed cache in loadManifestModelIdNormalizationPolicies short-circuits before snapshot fetch+clone. Eliminates N×structuredClone per agent --local dispatch.
+ 10. codex-raw-completion-fix          — local mirror of openclaw#82403, retire when upstream ships
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -113,6 +114,17 @@ PATCHES = [
     # less-complete approach and stays in place as a no-op (its APPLIED_MARKER check
     # short-circuits on the upstream native memo, which is present in this patch).
     ("snapshot-memo-multislot", "apply-snapshot-memo-multislot.py"),
+    # skip-clone-for-policies-fastpath (2026-05-16): second-order fix exposed by
+    # PR #82619. With the snapshot Map memo hitting, clonePluginMetadataSnapshot
+    # (structuredClone) became dominant — buildModelAliasIndex in the agent --local
+    # dispatch path triggers N clones per dispatch (~70% of CPU per sampling).
+    # This patch adds a params-keyed cache in loadManifestModelIdNormalizationPolicies
+    # that short-circuits BEFORE resolveMetadataSnapshotForPolicies → snapshot fetch +
+    # clone. Validated: agent --local eval-1 hang → 52.5s + PONG response on a
+    # heavily-loaded test system; CLI subcommands also see 30-60% speedups.
+    # Maintainer Shakker indicated a fix is in progress for a regression since 5.7
+    # (2026-05-16 12:05 PM); cross-check his PR and retire this when it lands.
+    ("skip-clone-for-policies-fastpath", "apply-skip-clone-for-policies-fastpath.py"),
     # web-search-onstartup (2026-05-12): flip exa/firecrawl plugin manifests
     # to activation.onStartup=true. Originally hypothesized to fix the
     # web_search-disabled issue but later proved INSUFFICIENT — see
