@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
-"""Patch: Add process.exit(0) after CLI command completion.
+"""Patch: Bound CLI agent lifetime + force exit on completion.
 
 Issue: #63609 — CLI commands hang indefinitely after completing.
-Fix: .then(() => { process.exit(0); }) on runLegacyCliEntry promise resolution.
 Files: dist/index.js
 
-Re-enabled on v2026.5.12-beta.2 (2026-05-12): retired patch was validated only
-against `openclaw config get` (upstream stopAndWait via PR #70691 covers that
-path). The `openclaw agent --local` path still hangs post-session-end (matches
-TECH-2026-2946/2947), causing RC backlog burn iterations to consume the full
-60min wall-clock budget when real work completes in ~20min. This patch's
-forced process.exit on runLegacyCliEntry's success path overrides whatever
-plugin background handle is keeping the event loop alive.
+Two layers (both target `openclaw agent` invocations):
+
+  Layer 1 (post-resolve fast exit, original patch): when runLegacyCliEntry's
+  promise resolves, force process.exit(0) + 3s SIGKILL self-kill. Handles the
+  case where the agent's logical work completes but ref'd handles (LCM
+  compaction, otel exporter, plugin background loops) keep the event loop
+  alive past natural exit. Re-enabled 2026-05-12 on v2026.5.12-beta.2 after
+  the retired patch's "agent --local" regression (matches TECH-2026-2946/2947).
+
+  Layer 2 (wall-clock safety net, added 2026-05-15): hard SIGKILL timer
+  registered before runLegacyCliEntry. Handles the case where the agent
+  runtime's promise NEVER resolves (e.g., codex app-server crashes mid-call
+  leaving an awaited promise pending; LCM/gateway-WS handles where Layer 1's
+  .then() never fires). Defaults to 600s for `agent` subcommand invocations;
+  honors `--timeout N` (seconds) from argv with +30s grace so the agent's
+  own --timeout has first crack at clean shutdown; `--timeout 0` disables
+  (matches OC's "0 means no timeout" semantics in resolveAgentTimeoutMs).
+  Uses .unref() so the timer never prevents natural exit.
 
 The original entry.js half was dropped on re-enable: upstream moved `runCli`
 to `await runCli(argv)` form (entry.js:470), so the search pattern is stale.
-Additionally the original entry.js `replace` had a `process$1` typo (regex
-backreference inside a plain str.replace — meaningless). If that path needs
-re-patching, write a fresh search against the await-form.
 """
 import argparse
 import re
@@ -25,6 +32,23 @@ import sys
 from pathlib import Path
 
 DIST_DIR = Path.home() / ".nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
+
+# Layer 2 — hard wall-clock SIGKILL timer for `agent` invocations.
+# Inlined as a single-line IIFE for clean string-replace insertion.
+HARD_TIMER_IIFE = (
+    "(()=>{try{const a=process.argv;"
+    "const sub=a.find((v,i)=>i>=2&&!v.startsWith('-'));"
+    "if(sub!=='agent')return;"
+    "const ti=a.indexOf('--timeout');"
+    "let s=600;"
+    "if(ti>=0&&a[ti+1]){const p=parseInt(a[ti+1],10);"
+    "if(Number.isFinite(p)&&p>=0)s=p;}"
+    "if(s<=0)return;"
+    "const ms=s*1000+30000;"
+    "const t=setTimeout(()=>{try{console.error(`[openclaw] cli-exit-fix: hard wall-clock SIGKILL after ${ms/1000}s (timeout=${s}s + 30s grace)`);}catch{}"
+    "try{process.kill(process.pid,'SIGKILL');}catch{}},ms);"
+    "t.unref&&t.unref();}catch{}})();"
+)
 
 PATCHES = [
     {
@@ -36,6 +60,15 @@ PATCHES = [
         # signals SIGKILL to self if process.exit hasn't taken effect within 3s.
         "search": "runLegacyCliEntry(process.argv).catch(",
         "replace": "runLegacyCliEntry(process.argv).then(() => { setTimeout(() => { try { process.kill(process.pid, 'SIGKILL'); } catch {} }, 3000); process.exit(process.exitCode ?? 0); }).catch(",
+    },
+    {
+        "file": "index.js",
+        "description": "index.js: hard wall-clock SIGKILL timer for `agent` invocations (--timeout aware, 10min default)",
+        # MUST run AFTER the .then() patch above — searches for the patched .then(...) form.
+        # The hard timer fires regardless of whether runLegacyCliEntry's promise resolves,
+        # so it covers the "agent runtime hangs forever" case that Layer 1 misses.
+        "search": "runLegacyCliEntry(process.argv).then(() =>",
+        "replace": HARD_TIMER_IIFE + "runLegacyCliEntry(process.argv).then(() =>",
     },
 ]
 
