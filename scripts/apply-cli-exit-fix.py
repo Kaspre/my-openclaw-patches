@@ -2,9 +2,10 @@
 """Patch: Bound CLI agent lifetime + force exit on completion.
 
 Issue: #63609 — CLI commands hang indefinitely after completing.
-Files: dist/index.js
+Files: dist/index.js, dist/entry.js
 
-Two layers (both target `openclaw agent` invocations):
+Two conceptual layers (both target `openclaw agent` invocations), folded into
+one search/replace per target file because they touch the same line:
 
   Layer 1 (post-resolve fast exit, original patch): when runLegacyCliEntry's
   promise resolves, force process.exit(0) + 3s SIGKILL self-kill. Handles the
@@ -23,8 +24,18 @@ Two layers (both target `openclaw agent` invocations):
   (matches OC's "0 means no timeout" semantics in resolveAgentTimeoutMs).
   Uses .unref() so the timer never prevents natural exit.
 
+Combined-patch history: layers 1 and 2 were originally two sequential
+search/replace patches on the same `runLegacyCliEntry(process.argv).catch(`
+line — layer 2's search anchor was the patched output of layer 1. That made
+--dry-run report a false-negative for layer 2 (the anchor only exists in
+real-apply mode, where each iteration re-reads the file). Folded into a
+single replace 2026-05-16 (beta.3 upgrade) — same byte output, no order
+dependency, dry-run is accurate.
+
 The original entry.js half was dropped on re-enable: upstream moved `runCli`
-to `await runCli(argv)` form (entry.js:470), so the search pattern is stale.
+to `await runCli(argv)` form (entry.js:470), so the search pattern was
+stale. Restored 2026-05-15 against the new `runMainOrRootHelp` shape, and
+combined with Layer 2's IIFE in the same single replace.
 """
 import argparse
 import re
@@ -57,27 +68,26 @@ HARD_TIMER_IIFE_P1 = _hard_timer_iife("process$1")  # entry.js bundles process a
 
 PATCHES = [
     # === dist/index.js (legacy library-mode CLI; harmless if never main) ===
+    # Single combined replace that installs both layers in one pass:
+    #   (1) IIFE prefix — Layer 2 hard wall-clock SIGKILL timer (scheduled before dispatch)
+    #   (2) .then(() => {...}) — Layer 1 post-resolve fast exit + 3s SIGKILL fallback
     {
         "file": "index.js",
-        "description": "index.js: process.exit + SIGKILL fallback after runLegacyCliEntry resolves",
+        "description": "index.js: Layer 1 (post-resolve exit) + Layer 2 (wall-clock SIGKILL) for `agent` invocations",
         "search": "runLegacyCliEntry(process.argv).catch(",
-        "replace": "runLegacyCliEntry(process.argv).then(() => { setTimeout(() => { try { process.kill(process.pid, 'SIGKILL'); } catch {} }, 3000); process.exit(process.exitCode ?? 0); }).catch(",
-    },
-    {
-        "file": "index.js",
-        "description": "index.js: hard wall-clock SIGKILL timer for `agent` invocations (--timeout aware)",
-        "search": "runLegacyCliEntry(process.argv).then(() =>",
-        "replace": HARD_TIMER_IIFE + "runLegacyCliEntry(process.argv).then(() =>",
+        "replace": (
+            HARD_TIMER_IIFE
+            + "runLegacyCliEntry(process.argv)"
+            + ".then(() => { setTimeout(() => { try { process.kill(process.pid, 'SIGKILL'); } catch {} }, 3000); process.exit(process.exitCode ?? 0); })"
+            + ".catch("
+        ),
     },
     # === dist/entry.js (the ACTUAL CLI entry per openclaw.mjs `tryImport("./dist/entry.js")`) ===
     # This is where `openclaw agent --local` really runs. Patches on index.js are dormant
-    # for the CLI hot path; entry.js is what matters.
+    # for the CLI hot path; entry.js is what matters. Single replace combines both layers.
     {
         "file": "entry.js",
-        "description": "entry.js: hard wall-clock SIGKILL timer + post-resolve SIGKILL around runMainOrRootHelp",
-        # The whole inline `if (...) await runMainOrRootHelp(...)` is replaced. We:
-        #   (1) Run the IIFE BEFORE the dispatch so Layer 2 timer is scheduled early
-        #   (2) Convert the bare-statement form to a block + post-resolve cleanup (Layer 1)
+        "description": "entry.js: Layer 1 (post-resolve exit) + Layer 2 (wall-clock SIGKILL) around runMainOrRootHelp",
         "search": "if (!tryHandleRootVersionFastPath(process$1.argv)) await runMainOrRootHelp(process$1.argv);",
         "replace": (
             HARD_TIMER_IIFE_P1

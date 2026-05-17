@@ -15,7 +15,7 @@ Active patches (re-verified 2026.5.12-beta.2):
   7. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
   8. snapshot-memo-multislot           — bounded-LRU Map memo + broader cache eligibility for derived stale-source; fixes beta.2 CLI bootstrap plugin-walk loop where single-slot memo couldn't hold alternating memoKeys (workspaceDir set vs null). Mirrors upstream PR #82619 (in flight).
   9. clone-storm-fix                   — second-order fix exposed by #82619: params-keyed cache in loadManifestModelIdNormalizationPolicies short-circuits before snapshot fetch+clone. Eliminates the N×structuredClone "clone-storm" per agent --local dispatch.
- 10. codex-raw-completion-fix          — local mirror of openclaw#82403, retire when upstream ships
+ 10. codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403 merged upstream)
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -170,13 +170,14 @@ PATCHES = [
     # Original entry.js half was dropped — upstream refactored to await form
     # (and the original replace had a `process$1` regex typo anyway).
     ("cli-exit-fix", "apply-cli-exit-fix.py"),
-    # Local mirror of openclaw#82403 (merged 2026-05-16T11:13:55Z, commit
-    # f50c65f12454, NOT in v2026.5.16-beta.2 which was cut from a pre-merge
-    # commit). Releases Codex raw assistant completions when turn/completed is
-    # missing — closes the dominant cause of `openclaw agent --local` zombie
-    # processes that #71710 tracks. Retire this entry once an OC release that
-    # bundles #82403 (likely 5.16-beta.3 or later) is installed.
-    ("codex-raw-completion-fix", "apply-codex-raw-completion-fix.py"),
+    # Retired on v2026.5.16-beta.3 (2026-05-16): openclaw#82403 ships in
+    # beta.3 (run-attempt-DEhr_oag.js carries the upstream native fix).
+    # Verified on beta.3 dry-run: 2 of 4 sub-patches already-applied, other
+    # 2 patterns not found — upstream rewrote those hunks differently.
+    # Functionally equivalent: agent --local PI dispatch returns PONG cleanly
+    # in 47s in regression suite Tier 2 with this patch removed.
+    # Script kept on disk for archaeology.
+    # ("codex-raw-completion-fix", "apply-codex-raw-completion-fix.py"),
     # Retired on v2026.4.15: upstream added resolveBundledPluginCompatibleLoadValues
     # in activation-context-*.js which plumbs applyPluginAutoEnable + overrides
     # before the plugin registry loads. Our v4.15 probe returns 12 providers
