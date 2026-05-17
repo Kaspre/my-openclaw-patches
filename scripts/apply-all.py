@@ -170,6 +170,19 @@ PATCHES = [
     # Original entry.js half was dropped — upstream refactored to await form
     # (and the original replace had a `process$1` regex typo anyway).
     ("cli-exit-fix", "apply-cli-exit-fix.py"),
+    # infer-model-run-ephemeral-session — added 2026-05-16.
+    # `openclaw infer model run --gateway` (which the model-health monitor
+    # uses to probe openai/* models) was attaching every invocation to the
+    # default agent's persistent session lane ("main:main" = Heartbeat).
+    # That session accumulated past gpt-5.5's input window, causing the
+    # codex harness's pre-turn "remote compact task" to fail with
+    # context_length_exceeded → every active probe returned status=error →
+    # model-health monitor flipped openai/gpt-5.5 to `down` despite the
+    # model itself being healthy (passive harvest of real agent turns kept
+    # succeeding through 18:39Z 2026-05-16). Patch injects a fresh
+    # ephemeral sessionId+sessionKey per `infer model run` invocation so
+    # each probe gets a clean codex rollout.
+    ("infer-model-run-ephemeral-session", "apply-infer-model-run-ephemeral-session.py"),
     # Retired on v2026.5.16-beta.3 (2026-05-16): openclaw#82403 ships in
     # beta.3 (run-attempt-DEhr_oag.js carries the upstream native fix).
     # Verified on beta.3 dry-run: 2 of 4 sub-patches already-applied, other
