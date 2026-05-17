@@ -63,39 +63,45 @@ def _hard_timer_iife(proc_var: str) -> str:
         "t.unref&&t.unref();}catch{}})();"
     )
 
-HARD_TIMER_IIFE = _hard_timer_iife("process")
-HARD_TIMER_IIFE_P1 = _hard_timer_iife("process$1")  # entry.js bundles process as process$1
+# Stable substring inside the IIFE — used to detect "already applied" without
+# rebuilding the full replacement literal (which depends on the captured alias).
+APPLIED_MARKER = "cli-exit-fix: hard wall-clock SIGKILL"
 
-PATCHES = [
+# Each recipe has a REGEX anchor that captures the process-alias (group 1).
+# The bundler emits `process` in some files and `process$1` (or potentially
+# `process$2` in future builds) in others — we discover it at apply time
+# instead of hardcoding. See PATCHING-GUIDE.md §5b.
+PATCH_RECIPES = [
     # === dist/index.js (legacy library-mode CLI; harmless if never main) ===
-    # Single combined replace that installs both layers in one pass:
-    #   (1) IIFE prefix — Layer 2 hard wall-clock SIGKILL timer (scheduled before dispatch)
-    #   (2) .then(() => {...}) — Layer 1 post-resolve fast exit + 3s SIGKILL fallback
     {
         "file": "index.js",
         "description": "index.js: Layer 1 (post-resolve exit) + Layer 2 (wall-clock SIGKILL) for `agent` invocations",
-        "search": "runLegacyCliEntry(process.argv).catch(",
-        "replace": (
-            HARD_TIMER_IIFE
-            + "runLegacyCliEntry(process.argv)"
-            + ".then(() => { setTimeout(() => { try { process.kill(process.pid, 'SIGKILL'); } catch {} }, 3000); process.exit(process.exitCode ?? 0); })"
+        "anchor_re": re.compile(
+            r"runLegacyCliEntry\((process(?:\$\d+)?)\.argv\)\.catch\("
+        ),
+        "build_replacement": lambda alias: (
+            _hard_timer_iife(alias)
+            + f"runLegacyCliEntry({alias}.argv)"
+            + f".then(() => {{ setTimeout(() => {{ try {{ {alias}.kill({alias}.pid, 'SIGKILL'); }} catch {{}} }}, 3000); {alias}.exit({alias}.exitCode ?? 0); }})"
             + ".catch("
         ),
     },
     # === dist/entry.js (the ACTUAL CLI entry per openclaw.mjs `tryImport("./dist/entry.js")`) ===
-    # This is where `openclaw agent --local` really runs. Patches on index.js are dormant
-    # for the CLI hot path; entry.js is what matters. Single replace combines both layers.
+    # The \1 backreference forces both occurrences of process$N to match the SAME alias.
     {
         "file": "entry.js",
         "description": "entry.js: Layer 1 (post-resolve exit) + Layer 2 (wall-clock SIGKILL) around runMainOrRootHelp",
-        "search": "if (!tryHandleRootVersionFastPath(process$1.argv)) await runMainOrRootHelp(process$1.argv);",
-        "replace": (
-            HARD_TIMER_IIFE_P1
-            + "if (!tryHandleRootVersionFastPath(process$1.argv)) { "
-            + "await runMainOrRootHelp(process$1.argv); "
-            + "setTimeout(() => { try { process$1.kill(process$1.pid, 'SIGKILL'); } catch {} }, 3000); "
-            + "process$1.exit(process$1.exitCode ?? 0); "
-            + "}"
+        "anchor_re": re.compile(
+            r"if \(!tryHandleRootVersionFastPath\((process(?:\$\d+)?)\.argv\)\) "
+            r"await runMainOrRootHelp\(\1\.argv\);"
+        ),
+        "build_replacement": lambda alias: (
+            _hard_timer_iife(alias)
+            + f"if (!tryHandleRootVersionFastPath({alias}.argv)) {{ "
+            + f"await runMainOrRootHelp({alias}.argv); "
+            + f"setTimeout(() => {{ try {{ {alias}.kill({alias}.pid, 'SIGKILL'); }} catch {{}} }}, 3000); "
+            + f"{alias}.exit({alias}.exitCode ?? 0); "
+            + f"}}"
         ),
     },
 ]
@@ -113,30 +119,40 @@ def main():
         sys.exit(0)
 
     all_ok = True
-    for patch in PATCHES:
-        fpath = dist / patch["file"]
+    for recipe in PATCH_RECIPES:
+        fpath = dist / recipe["file"]
         if not fpath.exists():
-            print(f"SKIP: {patch['file']} not found")
+            print(f"SKIP: {recipe['file']} not found")
             continue
 
         content = fpath.read_text()
 
-        if patch["replace"] in content:
-            print(f"OK: {patch['description']} (already applied)")
+        if APPLIED_MARKER in content:
+            print(f"OK: {recipe['description']} (already applied)")
             continue
 
-        if patch["search"] not in content:
-            print(f"WARN: {patch['description']} — search pattern not found (file may have changed)")
+        matches = list(recipe["anchor_re"].finditer(content))
+        if not matches:
+            print(f"WARN: {recipe['description']} — anchor pattern not found (structural drift; review patch)")
+            all_ok = False
+            continue
+        if len(matches) > 1:
+            print(f"WARN: {recipe['description']} — anchor matched {len(matches)} times (expected 1); aborting")
             all_ok = False
             continue
 
+        match = matches[0]
+        alias = match.group(1)
+        search_literal = match.group(0)
+        replace_literal = recipe["build_replacement"](alias)
+
         if args.dry_run:
-            print(f"DRY-RUN: would apply {patch['description']}")
+            print(f"DRY-RUN: would apply {recipe['description']} (alias={alias})")
             continue
 
-        new_content = content.replace(patch["search"], patch["replace"], 1)
+        new_content = content.replace(search_literal, replace_literal, 1)
         fpath.write_text(new_content)
-        print(f"APPLIED: {patch['description']}")
+        print(f"APPLIED: {recipe['description']} (alias={alias})")
 
     if not all_ok:
         sys.exit(1)

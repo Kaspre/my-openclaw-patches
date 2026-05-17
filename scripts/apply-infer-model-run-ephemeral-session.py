@@ -24,7 +24,8 @@ register.agent-*.js), and a fresh OC sessionId causes the codex harness to
 spin up a fresh rollout — no inherited compact-overflow context.
 
 Files: dist/capability-cli-*.js
-PR: TBD (file upstream after local validation)
+PR: openclaw#82861 — MERGED 2026-05-17, ships in 2026.5.17. Retire this local
+patch once we upgrade past 2026.5.16-beta.4.
 
 Usage:
   python3 apply-infer-model-run-ephemeral-session.py [--dry-run] [--dist-dir PATH]
@@ -33,6 +34,7 @@ Usage:
 import argparse
 import glob
 import os
+import re
 import shutil
 import sys
 
@@ -47,11 +49,46 @@ BACKUP_SUFFIX = ".bak-infer-ephemeral"
 OLD_IMPORTS_ANCHOR = (
     'import { i as GATEWAY_CLIENT_NAMES, r as GATEWAY_CLIENT_MODES } from "./client-info-CUFg6Tbz.js";'
 )
-NEW_IMPORTS_BLOCK = (
-    OLD_IMPORTS_ANCHOR
-    + '\nimport { o as buildExplicitSessionIdSessionKey } from "./model-fallback-DiS9IGQs.js";'
-    + '\nimport { randomUUID as __inferEphemeralRandomUUID } from "node:crypto";'
-)
+
+
+def find_model_fallback_chunk(dist_dir):
+    """Locate the active model-fallback-<hash>.js chunk, excluding bak and
+    auth.runtime sibling files. Hash drifts on every release."""
+    candidates = [
+        os.path.basename(f)
+        for f in glob.glob(os.path.join(dist_dir, "model-fallback-*.js"))
+        if ".bak" not in f and "auth.runtime" not in os.path.basename(f)
+    ]
+    if len(candidates) != 1:
+        raise RuntimeError(
+            f"Expected exactly 1 model-fallback chunk in {dist_dir}, found {len(candidates)}: {candidates}"
+        )
+    return candidates[0]
+
+
+def find_build_explicit_session_alias(dist_dir, chunk_filename):
+    """Find the minified short alias for buildExplicitSessionIdSessionKey in
+    the model-fallback chunk. The chunk exports as `buildExplicitSessionIdSessionKey as <X>`;
+    we then import that short `<X>` and rename it back. `<X>` drifts per release."""
+    path = os.path.join(dist_dir, chunk_filename)
+    with open(path, "r") as f:
+        content = f.read()
+    match = re.search(r"buildExplicitSessionIdSessionKey\s+as\s+(\w+)", content)
+    if not match:
+        raise RuntimeError(
+            f"buildExplicitSessionIdSessionKey export alias not found in {chunk_filename}"
+        )
+    return match.group(1)
+
+
+def build_new_imports_block(dist_dir):
+    chunk = find_model_fallback_chunk(dist_dir)
+    alias = find_build_explicit_session_alias(dist_dir, chunk)
+    return (
+        OLD_IMPORTS_ANCHOR
+        + f'\nimport {{ {alias} as buildExplicitSessionIdSessionKey }} from "./{chunk}";'
+        + '\nimport { randomUUID as __inferEphemeralRandomUUID } from "node:crypto";'
+    )
 
 # Edit 2: inject sessionId+sessionKey into the gateway "agent" params object.
 # Anchor on a unique line inside runModelRun's gateway branch — the
@@ -79,12 +116,16 @@ NEW_PARAMS_OPEN = (
     "\t\t\tsessionKey: __inferEphemeralSessionKey,\n"
 )
 
-REPLACEMENTS = [
-    ("imports for ephemeral session helpers", OLD_IMPORTS_ANCHOR, NEW_IMPORTS_BLOCK),
-    ("inject ephemeral sessionId+sessionKey", OLD_PARAMS_OPEN, NEW_PARAMS_OPEN),
-]
-
 MARKER = "__inferEphemeralSessionId"
+
+
+def build_replacements(dist_dir):
+    """REPLACEMENTS depend on dist_dir because the model-fallback chunk hash
+    drifts on every release. Build at apply time, not module load time."""
+    return [
+        ("imports for ephemeral session helpers", OLD_IMPORTS_ANCHOR, build_new_imports_block(dist_dir)),
+        ("inject ephemeral sessionId+sessionKey", OLD_PARAMS_OPEN, NEW_PARAMS_OPEN),
+    ]
 
 
 def find_capability_cli_files(dist_dir):
@@ -93,7 +134,7 @@ def find_capability_cli_files(dist_dir):
     return sorted(files)
 
 
-def apply_patch(filepath, dry_run=False):
+def apply_patch(filepath, replacements, dry_run=False):
     with open(filepath, "r") as f:
         content = f.read()
 
@@ -101,7 +142,7 @@ def apply_patch(filepath, dry_run=False):
         print(f"  SKIP (already patched): {os.path.basename(filepath)}")
         return False
 
-    for name, old, new in REPLACEMENTS:
+    for name, old, new in replacements:
         count = content.count(old)
         if count == 0:
             print(f"  ERROR: pattern not found for '{name}' in {os.path.basename(filepath)}")
@@ -112,7 +153,7 @@ def apply_patch(filepath, dry_run=False):
         content = content.replace(old, new)
 
     if dry_run:
-        print(f"  DRY RUN OK: {os.path.basename(filepath)} — all {len(REPLACEMENTS)} replacements matched")
+        print(f"  DRY RUN OK: {os.path.basename(filepath)} — all {len(replacements)} replacements matched")
         return True
 
     backup = filepath + BACKUP_SUFFIX
@@ -123,7 +164,7 @@ def apply_patch(filepath, dry_run=False):
     with open(filepath, "w") as f:
         f.write(content)
 
-    print(f"  PATCHED: {os.path.basename(filepath)} — {len(REPLACEMENTS)} replacements applied")
+    print(f"  PATCHED: {os.path.basename(filepath)} — {len(replacements)} replacements applied")
     return True
 
 
@@ -138,13 +179,19 @@ def main():
         print(f"ERROR: No capability-cli-*.js files found in {args.dist_dir}")
         sys.exit(1)
 
+    try:
+        replacements = build_replacements(args.dist_dir)
+    except RuntimeError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
+
     print(f"Infer Model Run Ephemeral Session Patch {'(DRY RUN)' if args.dry_run else ''}")
     print(f"Found {len(files)} capability-cli file(s)")
     print()
 
     patched = 0
     for f in files:
-        if apply_patch(f, dry_run=args.dry_run):
+        if apply_patch(f, replacements, dry_run=args.dry_run):
             patched += 1
 
     print()
