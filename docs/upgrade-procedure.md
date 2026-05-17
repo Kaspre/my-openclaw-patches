@@ -43,21 +43,35 @@
    systemctl --user stop openclaw-gateway
    ```
 
-7. **Apply only still-needed patches** — filenames change every version, search by code patterns not filenames
-   - Exec host enforcement override (`patches/exec-host-enforcement-override.md`)
-   - Heartbeat sessionKey fix, Changes 2-5 (`patches/heartbeat-sessionkey-fix.md`)
-   - ~~Approval prefix-match~~ — DROPPED: caused auto-expire bug on v2026.3.8, not needed with Discord buttons
-   - Skip any patches confirmed fixed upstream in step 5
+7. **Dry-run gate — catch pattern drift BEFORE touching the dist**
+   ```bash
+   python3 ~/my-openclaw-patches/scripts/apply-all.py --dry-run
+   ```
+   - All entries must report `OK`. Exit code is non-zero on any miss.
+   - A `WARN: ... pattern not found` means the patch's anchor no longer matches —
+     review whether (a) upstream has merged the fix (retire the patch), (b) the
+     anchor needs hardening per PATCHING-GUIDE.md §5b (cosmetic drift), or (c)
+     real structural change requires rewriting the patch (do NOT proceed past
+     this step until resolved).
+   - At this point the gateway is still running on UNPATCHED code from step 4,
+     so any decision here has a clean rollback path (just re-start the watchdog).
 
-8. **Restart gateway on patched code**
+8. **Apply only still-needed patches** — filenames change every version, search by code patterns not filenames
+   ```bash
+   python3 ~/my-openclaw-patches/scripts/apply-all.py
+   ```
+   - Skips already-applied patches via per-script markers
+   - Skip any patches confirmed fixed upstream in step 5 by commenting them out of `PATCHES` in `apply-all.py`
+
+9. **Restart gateway on patched code**
    ```bash
    systemctl --user restart openclaw-gateway
    ```
 
-9. **Re-enable watchdog timer**
-   ```bash
-   systemctl --user start openclaw-watchdog.timer
-   ```
+10. **Re-enable watchdog timer**
+    ```bash
+    systemctl --user start openclaw-watchdog.timer
+    ```
 
 ## Post-Upgrade Verification (config regressions)
 
@@ -94,6 +108,7 @@ If something goes wrong:
 - Watchdog checks port 18789 every 5 minutes — disable it first to prevent interference
 - `--no-restart` lets us control when the gateway starts on new code
 - **Baseline test before patching** catches: (1) patches merged upstream that are no longer needed, (2) patches that now conflict with upstream changes, (3) new regressions unrelated to our patches
+- **Dry-run gate before apply** catches pattern drift while the gateway is still running on the unpatched dist, so a half-applied state can never leave the gateway broken between steps. A `WARN: pattern not found` here is the signal to evaluate whether the patch is even still needed — see PATCHING-GUIDE.md §5b on cosmetic vs structural drift
 - Gateway is stopped again for patching so it comes up clean on fully patched code
 - Re-enabling the watchdog last avoids any race condition
 
