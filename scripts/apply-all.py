@@ -5,17 +5,16 @@ Apply all OpenClaw patches in the correct order.
 Usage:
   python3 apply-all.py [--dry-run] [--dist-dir PATH]
 
-Active patches (re-verified 2026.5.12-beta.2):
+Active patches (last updated during 2026.5.18-beta.1 retirement pass):
   1. heartbeat-sessionkey              — partial upstream coverage; PR #80214 covers Change 4 only (Changes 1/2/3 still apply to 3 files)
-  2. bootstrap-missing-marker-fix      — suppress BOOTSTRAP.md marker (third-party PR #42542 still OPEN)
-  3. plugin-register-skip-on-inspection — partial upstream coverage; issue #56522 fix covers config schema path only (different loader surface still applies)
-  4. cli-exit-fix                      — process.exit + SIGKILL-fallback on runLegacyCliEntry resolve; fixes `agent --local` post-session hang (TECH-2026-2946); plain process.exit gets preempted by ref'd handles from LCM/otel/plugin background loops
-  5. plugin-metadata-snapshot-memo     — CLI bootstrap memo of loadPluginMetadataSnapshot (no upstream PR)
-  6. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #7)
-  7. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
-  8. snapshot-memo-multislot           — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with clone-storm-fix; Shakker's upstream hot-path fix obviates both cache patches)
-  9. clone-storm-fix                   — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with snapshot-memo-multislot)
- 10. codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403 merged upstream)
+  2. plugin-register-skip-on-inspection — partial upstream coverage; issue #56522 fix covers config schema path only (different loader surface still applies)
+  3. cli-exit-fix                      — process.exit + SIGKILL-fallback on runLegacyCliEntry resolve; fixes `agent --local` post-session hang (TECH-2026-2946); plain process.exit gets preempted by ref'd handles from LCM/otel/plugin background loops
+  4. plugin-metadata-snapshot-memo     — CLI bootstrap memo of loadPluginMetadataSnapshot (no upstream PR)
+  5. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #6)
+  6. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
+  7. snapshot-memo-multislot           — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with clone-storm-fix; Shakker's upstream hot-path fix obviates both cache patches)
+  8. clone-storm-fix                   — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with snapshot-memo-multislot)
+  9. codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403 merged upstream)
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -25,6 +24,9 @@ Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED
 
 On hold:
   - sessions-manage-tool    — programmatic session compact/reset (PR #52422, apply on demand)
+
+Retired on v2026.5.18-beta.1:
+  - bootstrap-missing-marker-fix      — runtime path fixed upstream via resolver-level completed-workspace root BOOTSTRAP filtering; see docs/retired-bootstrap-missing-marker-fix-2026-05-19.md
 
 Retired on v2026.5.12-beta.2:
   - memoryflush-fix                    — our PR #51421 merged 2026-05-08 by Kaspre (dry-run finds no targets)
@@ -77,7 +79,11 @@ PATCHES = [
     # Retired in v2026.4.12: upstream isRunnableJob now uses previousRunAtMs > lastRunAtMs
     # guard for cron jobs + #63507 fixes nextRunAtMs <= 0. Script kept for archaeology.
     # ("cron-duplicate-fix", "apply-cron-duplicate-fix.py"),
-    ("bootstrap-missing-marker-fix", "apply-bootstrap-missing-marker-fix.py"),
+    # Retired on v2026.5.18-beta.1: the LLM-facing/runtime issue is fixed
+    # upstream in resolveBootstrapFilesForRun via completed-workspace root
+    # BOOTSTRAP.md filtering. The old local patch only changes the lower-level
+    # raw loader shape. See docs/retired-bootstrap-missing-marker-fix-2026-05-19.md.
+    # ("bootstrap-missing-marker-fix", "apply-bootstrap-missing-marker-fix.py"),
     # Retired in v2026.4.9: merged upstream (PR #58928 effectively landed as a
     # fallback read `context.systemPrompt ?? context.system` at the recordStage
     # call site in pi-embedded-*.js). Script kept on disk for archaeology.

@@ -21,9 +21,8 @@ systemctl --user restart openclaw-gateway
 |---|--------|-------|-------|-------------|
 | 1 | `apply-heartbeat-sessionkey-fix.py` | #14191 / PR #50818 | 2 | Fix exec notification delivery (Changes 2+4 of PR #21682; Changes 3+5 refactored upstream) |
 | 2 | `apply-memoryflush-fix.py` | #12590 / PR #51421 | 1 | Fix flush skipping every other compaction |
-| 3 | `apply-bootstrap-missing-marker-fix.py` | #26877 / PR #42542 | 1 | Suppress BOOTSTRAP.md missing marker injection |
-| 4 | `apply-plugin-register-skip-on-inspection.py` | #56522 | 1 | Skip register() during plugin inspection (startup perf) |
-| 5 | `apply-cli-exit-fix.py` | #63609 | 2 | process.exit after CLI completes (partial — #64072 covers Windows) |
+| 3 | `apply-plugin-register-skip-on-inspection.py` | #56522 | 1 | Skip register() during plugin inspection (startup perf) |
+| 4 | `apply-cli-exit-fix.py` | #63609 | 2 | process.exit after CLI completes (partial — #64072 covers Windows) |
 
 ### On Hold
 
@@ -35,6 +34,7 @@ systemctl --user restart openclaw-gateway
 
 | Script | Retired | Reason |
 |--------|---------|--------|
+| `apply-bootstrap-missing-marker-fix.py` | v2026.5.18-beta.1 | Runtime path fixed upstream via resolver-level completed-workspace root `BOOTSTRAP.md` filtering. Findings: `docs/retired-bootstrap-missing-marker-fix-2026-05-19.md` |
 | `apply-channels-before-ws-handlers.py` | v2026.4.12 | Merged upstream (#63480 in v4.10) |
 | `apply-cron-duplicate-fix.py` | v2026.4.12 | Superseded upstream (`previousRunAtMs` guard + #63507) |
 | `apply-loglevel-fix.py` | v2026.4.9 | Merged upstream (PR #44646) |
