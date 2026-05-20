@@ -15,6 +15,7 @@ Active patches (last updated during 2026.5.18-beta.1 retirement pass):
   7. snapshot-memo-multislot           — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with clone-storm-fix; Shakker's upstream hot-path fix obviates both cache patches)
   8. clone-storm-fix                   — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with snapshot-memo-multislot)
   9. codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403 merged upstream)
+ 10. discord-guild-accepted-typing     — focused local backport of #76091/#79104 accepted typing gate for Discord guild channels with typingMode=instant
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -141,6 +142,15 @@ PATCHES = [
     # loaded in --local. The no-op hook gives them an activation trigger
     # without changing behavior. See investigation notes in the script.
     ("passive-plugin-hook-injection", "apply-passive-plugin-hook-injection.py"),
+    # discord-guild-accepted-typing (2026-05-19): focused local backport of
+    # openclaw#76091/#79104. The installed @openclaw/discord bundle only sends
+    # the early accepted typing cue for DMs, so allowlisted guild channels can
+    # sit silent until slow model startup reaches the reply pipeline. Honor
+    # explicit typingMode="instant" for guild/group contexts while preserving
+    # the default mention-required behavior for unconfigured guild/group
+    # messages. Requires agents.defaults.typingMode="instant" (already set in
+    # this host's openclaw.json) for unmentioned #captain-verbose prompts.
+    ("discord-guild-accepted-typing", "apply-discord-guild-accepted-typing.py"),
     # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
     # Patch script exists (apply-sessions-manage-tool.py) and was originally
     # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on

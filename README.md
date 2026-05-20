@@ -23,6 +23,7 @@ systemctl --user restart openclaw-gateway
 | 2 | `apply-memoryflush-fix.py` | #12590 / PR #51421 | 1 | Fix flush skipping every other compaction |
 | 3 | `apply-plugin-register-skip-on-inspection.py` | #56522 | 1 | Skip register() during plugin inspection (startup perf) |
 | 4 | `apply-cli-exit-fix.py` | #63609 | 2 | process.exit after CLI completes (partial — #64072 covers Windows) |
+| 5 | `apply-discord-guild-accepted-typing.py` | #79104 / PR #76091 | 1 | Restore early Discord typing cue in allowlisted guild channels when `typingMode=instant` |
 
 ### On Hold
 
