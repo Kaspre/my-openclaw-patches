@@ -151,6 +151,15 @@ PATCHES = [
     # messages. Requires agents.defaults.typingMode="instant" (already set in
     # this host's openclaw.json) for unmentioned #captain-verbose prompts.
     ("discord-guild-accepted-typing", "apply-discord-guild-accepted-typing.py"),
+    # discord-voice-autojoin-retry (2026-05-19): DiscordVoiceManager.autoJoin()
+    # only fires on Discord Ready/Resumed; non-fatal failures (e.g. transient
+    # OpenAI realtime connection timeouts) skip silently with no retry. That
+    # defeats always-on Captain voice presence — a single bad gateway start
+    # leaves Captain out of voice until the next restart. Patch adds a 30s
+    # setTimeout retry inside the non-fatal failure branch; fatal failures
+    # (auth/forbidden/etc.) still short-circuit. Retire when upstream adds
+    # native retry (no public timeline as of @openclaw/discord 2026.5.18).
+    ("discord-voice-autojoin-retry", "apply-discord-voice-autojoin-retry.py"),
     # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
     # Patch script exists (apply-sessions-manage-tool.py) and was originally
     # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on
