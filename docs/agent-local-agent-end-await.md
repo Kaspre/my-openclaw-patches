@@ -47,7 +47,7 @@ Upstream draft PR:
 
 - `openclaw/openclaw#85007`
 - branch: `Kaspre:fix/agent-local-agent-end-hooks`
-- commit: `57c0e6c0d9ca18383e5ea348f93c6513d8430704`
+- commit: `322078452759e9cbe1a00b1a3b6c1000b978c193`
 
 ## Retire when
 
