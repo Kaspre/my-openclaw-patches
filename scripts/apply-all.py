@@ -160,6 +160,17 @@ PATCHES = [
     # (auth/forbidden/etc.) still short-circuit. Retire when upstream adds
     # native retry (no public timeline as of @openclaw/discord 2026.5.18).
     ("discord-voice-autojoin-retry", "apply-discord-voice-autojoin-retry.py"),
+    # peer-symlinks (2026-05-21): recreate the three peer-package symlinks
+    # under ~/.openclaw/npm/node_modules/.pnpm/<plugin>/node_modules/openclaw
+    # that point at the global Node `openclaw` SDK. Destroyed by every
+    # `pnpm install --force` (upgrade.sh runs this), and pnpm does NOT
+    # auto-recreate them under `package-import-method=copy` (which the new
+    # 5.19 fs-safe manifest validator requires). Symptoms when missing:
+    # codex/discord/lossless-claw plugins fail to load with module-not-found
+    # against `openclaw`. Idempotent: skips symlinks already pointing at
+    # the right SDK path. Retire when pnpm itself, the OC installer, or the
+    # 5.19 fs-safe validator changes the contract so these survive a `--force`.
+    ("peer-symlinks", "apply-peer-symlinks.py"),
     # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
     # Patch script exists (apply-sessions-manage-tool.py) and was originally
     # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on
