@@ -47,7 +47,10 @@ Upstream PR:
 
 - `openclaw/openclaw#85007`
 - branch: `Kaspre:fix/agent-local-agent-end-hooks`
-- commit: `5c76ec7ecf462a742c05550da31826ebc865f981`
+- commit: `ab51b299fd83fbc2bb9241cf41a4b0e9d3d7ddcd`
+- status: ready for maintainer review; hosted checks pass; ClawSweeper labels
+  include `proof: sufficient`, `rating: platinum hermit`, and
+  `status: ready for maintainer look`
 
 ## Retire when
 
