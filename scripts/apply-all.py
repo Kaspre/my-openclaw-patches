@@ -16,6 +16,7 @@ Active patches (last updated during 2026.5.18-beta.1 retirement pass):
   8. clone-storm-fix                   — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with snapshot-memo-multislot)
   9. codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403 merged upstream)
  10. discord-guild-accepted-typing     — focused local backport of #76091/#79104 accepted typing gate for Discord guild channels with typingMode=instant
+ 11. agent-local-agent-end-await       — await local CLI agent_end hooks before one-shot process teardown so OTEL/observation providers can flush
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -171,6 +172,14 @@ PATCHES = [
     # the right SDK path. Retire when pnpm itself, the OC installer, or the
     # 5.19 fs-safe validator changes the contract so these survive a `--force`.
     ("peer-symlinks", "apply-peer-symlinks.py"),
+    # agent-local-agent-end-await (2026-05-21): local one-shot CLI agent
+    # terminal paths used to fire `agent_end` hooks and return immediately,
+    # allowing process teardown before observation-only providers such as OTEL
+    # flushed `openclaw.agent.turn`. Patch makes the lifecycle helper awaitable
+    # and awaits all seven local CLI terminal callsites. Persistent gateway/app
+    # runtimes intentionally remain fire-and-forget. Upstream draft PR:
+    # openclaw/openclaw#85007.
+    ("agent-local-agent-end-await", "apply-agent-local-agent-end-await.py"),
     # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
     # Patch script exists (apply-sessions-manage-tool.py) and was originally
     # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on

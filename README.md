@@ -24,6 +24,7 @@ systemctl --user restart openclaw-gateway
 | 3 | `apply-plugin-register-skip-on-inspection.py` | #56522 | 1 | Skip register() during plugin inspection (startup perf) |
 | 4 | `apply-cli-exit-fix.py` | #63609 | 2 | process.exit after CLI completes (partial — #64072 covers Windows) |
 | 5 | `apply-discord-guild-accepted-typing.py` | #79104 / PR #76091 | 1 | Restore early Discord typing cue in allowlisted guild channels when `typingMode=instant` |
+| 6 | `apply-agent-local-agent-end-await.py` | PR #85007 | 2 | Await local CLI `agent_end` hooks before one-shot process teardown so OTEL spans can flush |
 
 ### On Hold
 
