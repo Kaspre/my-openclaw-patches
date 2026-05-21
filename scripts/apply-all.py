@@ -172,6 +172,18 @@ PATCHES = [
     # the right SDK path. Retire when pnpm itself, the OC installer, or the
     # 5.19 fs-safe validator changes the contract so these survive a `--force`.
     ("peer-symlinks", "apply-peer-symlinks.py"),
+    # channel-selection-allow-bootstrap (2026-05-21): pass allowBootstrap:true
+    # in resolveAvailableKnownChannel's call to resolveOutboundChannelPlugin
+    # (channel-selection-*.js:23). Closes the in-agent message-tool path's
+    # plugin-load gap for --local agent dispatches that hit
+    # `Channel is unavailable: discord` 6+ times in 14 days (FRI-2026-05-07,
+    # -09, -10, -11, -14, -20, -21). RBP captured via /tmp/probe-channel-resolution.mjs:
+    # WITHOUT allowBootstrap → resolved=false; WITH allowBootstrap →
+    # resolved=true,id=discord,has_send_text=true. Findings doc:
+    # workspace/docs/findings/2026-05-20-discord-tool-path-channel-unavailable.md.
+    # Cross-references upstream #77254 (closed; that fix didn't touch the in-agent caller).
+    # Retire when upstream lands an equivalent fix.
+    ("channel-selection-allow-bootstrap", "apply-channel-selection-allow-bootstrap.py"),
     # agent-local-agent-end-await (2026-05-21): local one-shot CLI agent
     # terminal paths used to fire `agent_end` hooks and return immediately,
     # allowing process teardown before observation-only providers such as OTEL
