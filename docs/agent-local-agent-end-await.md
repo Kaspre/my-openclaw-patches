@@ -43,7 +43,7 @@ resultResolvedAfterRelease=true
 
 The current patch additionally matches upstream source shape: public SDK helper remains fire-and-forget, local CLI plus no-channel Codex app-server attempts use the awaited helper, and awaited hook timeouts stay ref'ed so the process remains alive until hook settlement or timeout.
 
-Upstream draft PR:
+Upstream PR:
 
 - `openclaw/openclaw#85007`
 - branch: `Kaspre:fix/agent-local-agent-end-hooks`
