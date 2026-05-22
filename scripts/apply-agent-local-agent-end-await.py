@@ -98,14 +98,24 @@ async function awaitAgentHarnessAgentEndHook(params) {
 HELPER_APPLIED_MARKER = "async function awaitAgentHarnessAgentEndHook(params)"
 HELPER_EXPORT_BEFORE = "export { buildAgentHookContext as a, runAgentHarnessLlmOutputHook as i, runAgentHarnessBeforeAgentFinalizeHook as n, runAgentHarnessLlmInputHook as r, runAgentHarnessAgentEndHook as t };"
 HELPER_EXPORT_AFTER = "export { buildAgentHookContext as a, runAgentHarnessLlmOutputHook as i, awaitAgentHarnessAgentEndHook as l, runAgentHarnessBeforeAgentFinalizeHook as n, runAgentHarnessLlmInputHook as r, runAgentHarnessAgentEndHook as t };"
-CLI_IMPORT_BEFORE = "import { a as buildAgentHookContext, i as runAgentHarnessLlmOutputHook, r as runAgentHarnessLlmInputHook, t as runAgentHarnessAgentEndHook } from \"./lifecycle-hook-helpers-B3NLL-Hy.js\";"
-CLI_IMPORT_AFTER = "import { a as buildAgentHookContext, i as runAgentHarnessLlmOutputHook, l as awaitAgentHarnessAgentEndHook, r as runAgentHarnessLlmInputHook } from \"./lifecycle-hook-helpers-B3NLL-Hy.js\";"
+# The lifecycle-hook-helpers filename hash rotates on every upstream build,
+# so derive it from the bundle under patch instead of hard-coding it.
+HELPER_HASH_RE = re.compile(r'"\./lifecycle-hook-helpers-([A-Za-z0-9_-]+)\.js"')
+CLI_IMPORT_BEFORE_TMPL = 'import {{ a as buildAgentHookContext, i as runAgentHarnessLlmOutputHook, r as runAgentHarnessLlmInputHook, t as runAgentHarnessAgentEndHook }} from "./lifecycle-hook-helpers-{hash}.js";'
+CLI_IMPORT_AFTER_TMPL = 'import {{ a as buildAgentHookContext, i as runAgentHarnessLlmOutputHook, l as awaitAgentHarnessAgentEndHook, r as runAgentHarnessLlmInputHook }} from "./lifecycle-hook-helpers-{hash}.js";'
 CLI_BARE_CALL_RE = re.compile(r"(?<!await )runAgentHarnessAgentEndHook\(")
 CLI_INTERMEDIATE_AWAIT_CALL_RE = re.compile(r"await runAgentHarnessAgentEndHook\(")
 CLI_FINAL_AWAIT_CALL_RE = re.compile(r"await awaitAgentHarnessAgentEndHook\(")
 EXPECTED_CLI_CALLS = 7
-RUN_ATTEMPT_IMPORT_BEFORE = 'import { i as runAgentHarnessLlmOutputHook, r as runAgentHarnessLlmInputHook, t as runAgentHarnessAgentEndHook } from "./lifecycle-hook-helpers-B3NLL-Hy.js";'
-RUN_ATTEMPT_IMPORT_AFTER = 'import { i as runAgentHarnessLlmOutputHook, l as awaitAgentHarnessAgentEndHook, r as runAgentHarnessLlmInputHook, t as runAgentHarnessAgentEndHook } from "./lifecycle-hook-helpers-B3NLL-Hy.js";'
+RUN_ATTEMPT_IMPORT_BEFORE_TMPL = 'import {{ i as runAgentHarnessLlmOutputHook, r as runAgentHarnessLlmInputHook, t as runAgentHarnessAgentEndHook }} from "./lifecycle-hook-helpers-{hash}.js";'
+RUN_ATTEMPT_IMPORT_AFTER_TMPL = 'import {{ i as runAgentHarnessLlmOutputHook, l as awaitAgentHarnessAgentEndHook, r as runAgentHarnessLlmInputHook, t as runAgentHarnessAgentEndHook }} from "./lifecycle-hook-helpers-{hash}.js";'
+
+
+def _resolve_helper_hash(path: Path, content: str) -> str:
+    match = HELPER_HASH_RE.search(content)
+    if not match:
+        raise RuntimeError(f"{path.name}: could not locate lifecycle-hook-helpers import")
+    return match.group(1)
 RUN_ATTEMPT_HELPER_BEFORE = """async function runCodexAppServerAttempt(params, options = {}) {"""
 RUN_ATTEMPT_HELPER_AFTER = """function shouldAwaitCodexAgentEndHook(params) {
 \treturn !params.messageChannel && !params.messageProvider;
@@ -160,11 +170,14 @@ def patch_helper(path: Path, dry_run: bool) -> bool:
 
 def patch_cli(path: Path, dry_run: bool) -> bool:
     content = path.read_text()
+    helper_hash = _resolve_helper_hash(path, content)
+    cli_import_before = CLI_IMPORT_BEFORE_TMPL.format(hash=helper_hash)
+    cli_import_after = CLI_IMPORT_AFTER_TMPL.format(hash=helper_hash)
     bare = list(CLI_BARE_CALL_RE.finditer(content))
     intermediate = list(CLI_INTERMEDIATE_AWAIT_CALL_RE.finditer(content))
     final = list(CLI_FINAL_AWAIT_CALL_RE.finditer(content))
 
-    if not bare and not intermediate and len(final) == EXPECTED_CLI_CALLS and CLI_IMPORT_AFTER in content:
+    if not bare and not intermediate and len(final) == EXPECTED_CLI_CALLS and cli_import_after in content:
         print(f"OK: {path.name}: all {EXPECTED_CLI_CALLS} local CLI agent_end calls use awaited helper")
         return False
 
@@ -178,13 +191,13 @@ def patch_cli(path: Path, dry_run: bool) -> bool:
         print(f"DRY-RUN: would patch {path.name}: use awaited agent_end helper")
         return True
 
-    patched = content.replace(CLI_IMPORT_BEFORE, CLI_IMPORT_AFTER, 1)
+    patched = content.replace(cli_import_before, cli_import_after, 1)
     patched = CLI_BARE_CALL_RE.sub("await awaitAgentHarnessAgentEndHook(", patched)
     patched = CLI_INTERMEDIATE_AWAIT_CALL_RE.sub("await awaitAgentHarnessAgentEndHook(", patched)
     after_bare = len(CLI_BARE_CALL_RE.findall(patched))
     after_intermediate = len(CLI_INTERMEDIATE_AWAIT_CALL_RE.findall(patched))
     after_final = len(CLI_FINAL_AWAIT_CALL_RE.findall(patched))
-    if CLI_IMPORT_AFTER not in patched or after_bare != 0 or after_intermediate != 0 or after_final != EXPECTED_CLI_CALLS:
+    if cli_import_after not in patched or after_bare != 0 or after_intermediate != 0 or after_final != EXPECTED_CLI_CALLS:
         raise RuntimeError(
             f"{path.name}: post-patch validation failed: bare={after_bare}, "
             f"intermediate={after_intermediate}, final={after_final}"
@@ -218,9 +231,12 @@ def patch_hook_runner(path: Path, dry_run: bool) -> bool:
 
 def patch_run_attempt(path: Path, dry_run: bool) -> bool:
     content = path.read_text()
+    helper_hash = _resolve_helper_hash(path, content)
+    run_attempt_import_before = RUN_ATTEMPT_IMPORT_BEFORE_TMPL.format(hash=helper_hash)
+    run_attempt_import_after = RUN_ATTEMPT_IMPORT_AFTER_TMPL.format(hash=helper_hash)
     final = list(RUN_ATTEMPT_FINAL_CALL_RE.finditer(content))
     if (
-        RUN_ATTEMPT_IMPORT_AFTER in content
+        run_attempt_import_after in content
         and RUN_ATTEMPT_HELPER_AFTER in content
         and len(final) == EXPECTED_RUN_ATTEMPT_CALLS
     ):
@@ -230,7 +246,7 @@ def patch_run_attempt(path: Path, dry_run: bool) -> bool:
         return False
 
     calls = list(RUN_ATTEMPT_CALL_RE.finditer(content))
-    if RUN_ATTEMPT_IMPORT_BEFORE not in content or RUN_ATTEMPT_HELPER_BEFORE not in content:
+    if run_attempt_import_before not in content or RUN_ATTEMPT_HELPER_BEFORE not in content:
         raise RuntimeError(f"{path.name}: expected Codex app-server agent_end structure")
     if len(calls) != EXPECTED_RUN_ATTEMPT_CALLS:
         raise RuntimeError(
@@ -244,13 +260,13 @@ def patch_run_attempt(path: Path, dry_run: bool) -> bool:
         )
         return True
 
-    patched = content.replace(RUN_ATTEMPT_IMPORT_BEFORE, RUN_ATTEMPT_IMPORT_AFTER, 1)
+    patched = content.replace(run_attempt_import_before, run_attempt_import_after, 1)
     patched = patched.replace(RUN_ATTEMPT_HELPER_BEFORE, RUN_ATTEMPT_HELPER_AFTER, 1)
     patched = RUN_ATTEMPT_CALL_RE.sub("await runCodexAgentEndHook(params, {", patched)
     after_final = len(RUN_ATTEMPT_FINAL_CALL_RE.findall(patched))
     after_bare = len(RUN_ATTEMPT_CALL_RE.findall(patched))
     if (
-        RUN_ATTEMPT_IMPORT_AFTER not in patched
+        run_attempt_import_after not in patched
         or RUN_ATTEMPT_HELPER_AFTER not in patched
         or after_final != EXPECTED_RUN_ATTEMPT_CALLS
         or after_bare != 0
