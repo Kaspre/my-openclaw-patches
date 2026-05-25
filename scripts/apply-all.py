@@ -8,7 +8,7 @@ Usage:
 Active patches (last updated during 2026.5.18-beta.1 retirement pass):
   1. heartbeat-sessionkey              — partial upstream coverage; PR #80214 covers Change 4 only (Changes 1/2/3 still apply to 3 files)
   2. plugin-register-skip-on-inspection — partial upstream coverage; issue #56522 fix covers config schema path only (different loader surface still applies)
-  3. cli-exit-fix                      — local backport of #86276 startup hard timeout plus #86264 deferred-maintenance cleanup for CLI exit
+  3. cli-exit-fix                      — v2 minimal: synchronous wall-clock timer + post-resolve forced exit (entry.js + index.js only; no context-engine patches)
   4. plugin-metadata-snapshot-memo     — CLI bootstrap memo of loadPluginMetadataSnapshot (no upstream PR)
   5. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #6)
   6. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
@@ -206,13 +206,12 @@ PATCHES = [
     # Retired in v2026.4.12: merged upstream (#63480 in v4.10 release notes).
     # Script kept for archaeology.
     # ("channels-before-ws-handlers", "apply-channels-before-ws-handlers.py"),
-    # cli-exit-fix — updated 2026-05-25 with local backports of #86276's
-    # startup hard timeout for `agent --local --timeout N` (exit 124 after
-    # N+30s, including setup/plugin-registration hangs) and #86264's
-    # post-completion deferred-maintenance cleanup. The old forced
-    # process.exit/SIGKILL success-path fallback is retired on the actual
-    # dist/entry.js CLI path once #86264 cleanup is present.
-    ("cli-exit-fix", "apply-cli-exit-fix.py"),
+    # cli-exit-fix v2 (2026-05-25) — minimal rewrite: synchronous IIFE
+    # wall-clock timer (argv-only, no async config import) + post-resolve
+    # process.exit/SIGKILL. Patches entry.js + index.js only. Drops the
+    # 500-LOC context-engine/run-main.js Layer 1 from v1.
+    # v1 kept at apply-cli-exit-fix.py for rollback.
+    ("cli-exit-fix", "apply-cli-exit-fix-v2.py"),
     # infer-model-run-ephemeral-session — RETIRED on v2026.5.16-beta.7
     # (2026-05-18): upstream PR #82861 landed early (memory said 5.17 ships,
     # but beta.7 already carries `runModelRun` constructing
