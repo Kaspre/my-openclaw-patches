@@ -87,6 +87,7 @@ DEFERRED_MAINTENANCE_MARKER = "short-lived CLI command completed before deferred
 CLI_RUN_MAIN_CLEANUP_MARKER = "cancelCliDeferredContextEngineMaintenance"
 CLI_RUN_MAIN_ROUTED_CLEANUP_MARKER = "shouldCancelDeferredMaintenanceOnExit"
 CLI_EXIT_HOOK_MARKER = "contextEngineTurnMaintenanceCliExitHook"
+CLI_EXIT_LOST_MARKER = "did not stop before CLI exit"
 OLD_APPLIED_MARKER = "cli-exit-fix: hard wall-clock SIGKILL"
 
 
@@ -142,6 +143,26 @@ def _find_read_best_effort_config_bundle(dist: Path) -> Path | None:
         return None
     print(
         "WARN: multiple readBestEffortConfig bundles found: "
+        + ", ".join(candidate.name for candidate in candidates)
+    )
+    return None
+
+
+def _find_task_registry_bundle(dist: Path) -> Path | None:
+    candidates = []
+    for candidate in sorted(dist.glob("task-registry-*.js")):
+        try:
+            if "markTaskLostById as _" in candidate.read_text():
+                candidates.append(candidate)
+        except UnicodeDecodeError:
+            continue
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        print("WARN: task-registry bundle with markTaskLostById not found")
+        return None
+    print(
+        "WARN: multiple task-registry bundles found: "
         + ", ".join(candidate.name for candidate in candidates)
     )
     return None
@@ -288,12 +309,30 @@ def _apply_context_engine_maintenance_patch(dist: Path, dry_run: bool) -> bool:
     if fpath is None:
         return False
     content = fpath.read_text()
-    if DEFERRED_MAINTENANCE_MARKER in content and CLI_EXIT_HOOK_MARKER in content:
+    if (
+        DEFERRED_MAINTENANCE_MARKER in content
+        and CLI_EXIT_HOOK_MARKER in content
+        and CLI_EXIT_LOST_MARKER in content
+    ):
         print(f"OK: {fpath.name} #86264 deferred maintenance hook cancellation (already applied)")
         return True
 
     new_content = content
     all_ok = True
+    task_registry_bundle = _find_task_registry_bundle(dist)
+    if task_registry_bundle is None:
+        return False
+    task_registry_import = f'import {{ _ as markTaskLostById }} from "./{task_registry_bundle.name}";'
+    if "markTaskLostById" not in new_content:
+        new_content, ok = _replace_once_regex(
+            new_content,
+            re.compile(
+                r'(import \{ c as updateTaskNotifyPolicyForOwner, i as findTaskByRunIdForOwner, n as cancelTaskByIdForOwner \} from "\./task-owner-access-[^"]+\.js";)'
+            ),
+            "\\1\n" + task_registry_import,
+            "context-engine-maintenance: import task lost marker",
+        )
+        all_ok = all_ok and ok
     full_replacements = [
         (
             'import { c as getQueueSize, i as enqueueCommandInLane } from "./command-queue-Bu19cj-7.js";',
@@ -317,7 +356,7 @@ def _apply_context_engine_maintenance_patch(dist: Path, dry_run: bool) -> bool:
         ),
         (
             "function markDeferredTurnMaintenanceTaskScheduleFailure(params) {",
-            "function cancelDeferredTurnMaintenanceTask(params) {\n\tconst task = findTaskByRunIdForOwner({\n\t\trunId: params.runId,\n\t\tcallerOwnerKey: params.sessionKey\n\t});\n\tif (!task) return;\n\tif ([\"succeeded\", \"failed\", \"timed_out\", \"cancelled\", \"lost\"].includes(task.status)) return;\n\tcancelTaskByIdForOwner({\n\t\ttaskId: task.taskId,\n\t\tcallerOwnerKey: params.sessionKey,\n\t\tendedAt: Date.now(),\n\t\tterminalSummary: params.terminalSummary\n\t});\n}\nasync function cancelActiveDeferredTurnMaintenanceRunsForCliExit(params) {\n\tconst activeEntries = Array.from(activeDeferredTurnMaintenanceRuns.entries());\n\tif (activeEntries.length === 0) return;\n\tabortDeferredTurnMaintenanceControllers({\n\t\tprocessLike: process,\n\t\treason: /* @__PURE__ */ new Error(\"short-lived CLI command completed before deferred maintenance\")\n\t});\n\tfor (const [activeSessionKey, state] of activeEntries) {\n\t\tstate.rerunRequested = false;\n\t\tactiveDeferredTurnMaintenanceRuns.delete(activeSessionKey);\n\t\tcancelDeferredTurnMaintenanceTask({\n\t\t\tsessionKey: activeSessionKey,\n\t\t\trunId: state.runId,\n\t\t\tterminalSummary: \"Deferred maintenance cancellation requested because the CLI command completed.\"\n\t\t});\n\t\tconst lane = resolveDeferredTurnMaintenanceLane(activeSessionKey);\n\t\tclearCommandLane(lane);\n\t\tresetCommandLane(lane);\n\t}\n\tconst drainMs = Math.max(0, Math.floor(params?.drainMs ?? TURN_MAINTENANCE_CLI_EXIT_DRAIN_MS));\n\tif (drainMs === 0) return;\n\tawait Promise.race([\n\t\tPromise.allSettled(activeEntries.map(([, state]) => state.promise)),\n\t\tnew Promise((resolve) => {\n\t\t\tconst timeout = setTimeout(resolve, drainMs);\n\t\t\ttimeout.unref?.();\n\t\t})\n\t]);\n}\nfunction markDeferredTurnMaintenanceTaskScheduleFailure(params) {",
+            "function cancelDeferredTurnMaintenanceTask(params) {\n\tconst task = findTaskByRunIdForOwner({\n\t\trunId: params.runId,\n\t\tcallerOwnerKey: params.sessionKey\n\t});\n\tif (!task) return;\n\tif ([\"succeeded\", \"failed\", \"timed_out\", \"cancelled\", \"lost\"].includes(task.status)) return;\n\tcancelTaskByIdForOwner({\n\t\ttaskId: task.taskId,\n\t\tcallerOwnerKey: params.sessionKey,\n\t\tendedAt: Date.now(),\n\t\tterminalSummary: params.terminalSummary\n\t});\n}\nfunction markDeferredTurnMaintenanceTaskLost(params) {\n\tconst task = findTaskByRunIdForOwner({\n\t\trunId: params.runId,\n\t\tcallerOwnerKey: params.sessionKey\n\t});\n\tif (!task) return;\n\tif ([\"succeeded\", \"failed\", \"timed_out\", \"cancelled\", \"lost\"].includes(task.status)) return;\n\tmarkTaskLostById({\n\t\ttaskId: task.taskId,\n\t\tendedAt: Date.now(),\n\t\terror: params.error\n\t});\n}\nasync function cancelActiveDeferredTurnMaintenanceRunsForCliExit(params) {\n\tconst activeEntries = Array.from(activeDeferredTurnMaintenanceRuns.entries());\n\tif (activeEntries.length === 0) return;\n\tabortDeferredTurnMaintenanceControllers({\n\t\tprocessLike: process,\n\t\treason: /* @__PURE__ */ new Error(\"short-lived CLI command completed before deferred maintenance\")\n\t});\n\tfor (const [activeSessionKey, state] of activeEntries) {\n\t\tstate.rerunRequested = false;\n\t\tactiveDeferredTurnMaintenanceRuns.delete(activeSessionKey);\n\t\tif (!state.isWorkerStarted()) cancelDeferredTurnMaintenanceTask({\n\t\t\tsessionKey: activeSessionKey,\n\t\t\trunId: state.runId,\n\t\t\tterminalSummary: \"Deferred maintenance cancelled because the CLI command completed.\"\n\t\t});\n\t\tconst lane = resolveDeferredTurnMaintenanceLane(activeSessionKey);\n\t\tclearCommandLane(lane);\n\t\tresetCommandLane(lane);\n\t}\n\tconst drainMs = Math.max(0, Math.floor(params?.drainMs ?? TURN_MAINTENANCE_CLI_EXIT_DRAIN_MS));\n\tif (drainMs === 0) return;\n\tconst settledSessionKeys = /* @__PURE__ */ new Set();\n\tconst trackedPromises = activeEntries.map(([activeSessionKey, state]) => state.promise.finally(() => {\n\t\tsettledSessionKeys.add(activeSessionKey);\n\t}));\n\tawait Promise.race([\n\t\tPromise.allSettled(trackedPromises),\n\t\tnew Promise((resolve) => {\n\t\t\tconst timeout = setTimeout(resolve, drainMs);\n\t\t\ttimeout.unref?.();\n\t\t})\n\t]);\n\tfor (const [activeSessionKey, state] of activeEntries) {\n\t\tif (!state.isWorkerStarted() || settledSessionKeys.has(activeSessionKey)) continue;\n\t\tmarkDeferredTurnMaintenanceTaskLost({\n\t\t\tsessionKey: activeSessionKey,\n\t\t\trunId: state.runId,\n\t\t\terror: \"Deferred maintenance did not stop before CLI exit after cancellation.\"\n\t\t});\n\t}\n}\nfunction markDeferredTurnMaintenanceTaskScheduleFailure(params) {",
             "context-engine-maintenance: add CLI-exit cancellation function",
         ),
         (
@@ -386,8 +425,8 @@ def _apply_context_engine_maintenance_patch(dist: Path, dry_run: bool) -> bool:
             "context-engine-maintenance: unregister timer abort listeners",
         ),
         (
-            "\t\trunPromise = enqueueCommandInLane(resolveDeferredTurnMaintenanceLane(sessionKey), async () => runDeferredTurnMaintenanceWorker({\n\t\t\tcontextEngine: params.contextEngine,\n\t\t\tsessionId: params.sessionId,\n\t\t\tsessionKey,\n\t\t\tsessionFile: params.sessionFile,\n\t\t\tsessionManager: params.sessionManager,\n\t\t\truntimeContext: params.runtimeContext,\n\t\t\tagentId: params.agentId,\n\t\t\tconfig: params.config,\n\t\t\trunId: task.runId\n\t\t}));",
-            "\t\trunPromise = enqueueCommandInLane(resolveDeferredTurnMaintenanceLane(sessionKey), async () => runDeferredTurnMaintenanceWorker({\n\t\t\tcontextEngine: params.contextEngine,\n\t\t\tsessionId: params.sessionId,\n\t\t\tsessionKey,\n\t\t\tsessionFile: params.sessionFile,\n\t\t\tsessionManager: params.sessionManager,\n\t\t\truntimeContext: params.runtimeContext,\n\t\t\tagentId: params.agentId,\n\t\t\tconfig: params.config,\n\t\t\trunId: task.runId,\n\t\t\tscheduledAbortSignal: schedulerAbort.abortSignal\n\t\t}));",
+            "\tlet runPromise;\n\ttry {\n\t\trunPromise = enqueueCommandInLane(resolveDeferredTurnMaintenanceLane(sessionKey), async () => runDeferredTurnMaintenanceWorker({\n\t\t\tcontextEngine: params.contextEngine,\n\t\t\tsessionId: params.sessionId,\n\t\t\tsessionKey,\n\t\t\tsessionFile: params.sessionFile,\n\t\t\tsessionManager: params.sessionManager,\n\t\t\truntimeContext: params.runtimeContext,\n\t\t\tagentId: params.agentId,\n\t\t\tconfig: params.config,\n\t\t\trunId: task.runId\n\t\t}));",
+            "\tlet runPromise;\n\tlet workerStarted = false;\n\ttry {\n\t\trunPromise = enqueueCommandInLane(resolveDeferredTurnMaintenanceLane(sessionKey), async () => {\n\t\t\tworkerStarted = true;\n\t\t\treturn await runDeferredTurnMaintenanceWorker({\n\t\t\t\tcontextEngine: params.contextEngine,\n\t\t\t\tsessionId: params.sessionId,\n\t\t\t\tsessionKey,\n\t\t\t\tsessionFile: params.sessionFile,\n\t\t\t\tsessionManager: params.sessionManager,\n\t\t\t\truntimeContext: params.runtimeContext,\n\t\t\t\tagentId: params.agentId,\n\t\t\t\tconfig: params.config,\n\t\t\t\trunId: task.runId,\n\t\t\t\tscheduledAbortSignal: schedulerAbort.abortSignal\n\t\t\t});\n\t\t});",
             "context-engine-maintenance: pass scheduler abort to worker",
         ),
         (
@@ -397,7 +436,7 @@ def _apply_context_engine_maintenance_patch(dist: Path, dry_run: bool) -> bool:
         ),
         (
             "\tstate = {\n\t\tpromise: trackedPromise,\n\t\trerunRequested: false,\n\t\tlatestParams: {\n\t\t\t...params,\n\t\t\tsessionKey\n\t\t}\n\t};",
-            "\tstate = {\n\t\tpromise: trackedPromise,\n\t\trerunRequested: false,\n\t\tlatestParams: {\n\t\t\t...params,\n\t\t\tsessionKey\n\t\t},\n\t\ttaskId: task.taskId,\n\t\trunId: task.runId\n\t};",
+            "\tstate = {\n\t\tpromise: trackedPromise,\n\t\trerunRequested: false,\n\t\tlatestParams: {\n\t\t\t...params,\n\t\t\tsessionKey\n\t\t},\n\t\ttaskId: task.taskId,\n\t\trunId: task.runId,\n\t\tisWorkerStarted: () => workerStarted\n\t};",
             "context-engine-maintenance: track task/run ids",
         ),
         (
@@ -413,8 +452,8 @@ def _apply_context_engine_maintenance_patch(dist: Path, dry_run: bool) -> bool:
             "context-engine-maintenance: add CLI-exit hook key",
         ),
         (
-            "\tawait Promise.race([\n\t\tPromise.allSettled(activeEntries.map(([, state]) => state.promise)),\n\t\tnew Promise((resolve) => {\n\t\t\tconst timeout = setTimeout(resolve, drainMs);\n\t\t\ttimeout.unref?.();\n\t\t})\n\t]);\n}\nfunction markDeferredTurnMaintenanceTaskScheduleFailure(params) {",
-            "\tawait Promise.race([\n\t\tPromise.allSettled(activeEntries.map(([, state]) => state.promise)),\n\t\tnew Promise((resolve) => {\n\t\t\tconst timeout = setTimeout(resolve, drainMs);\n\t\t\ttimeout.unref?.();\n\t\t})\n\t]);\n}\nfunction registerDeferredTurnMaintenanceCliExitHook() {\n\tconst globalState = globalThis;\n\tconst state = globalState[DEFERRED_TURN_MAINTENANCE_CLI_EXIT_HOOK_KEY] ?? {};\n\tstate.cancelForCliExit = cancelActiveDeferredTurnMaintenanceRunsForCliExit;\n\tglobalState[DEFERRED_TURN_MAINTENANCE_CLI_EXIT_HOOK_KEY] = state;\n}\nregisterDeferredTurnMaintenanceCliExitHook();\nfunction markDeferredTurnMaintenanceTaskScheduleFailure(params) {",
+            "function markDeferredTurnMaintenanceTaskScheduleFailure(params) {",
+            "function registerDeferredTurnMaintenanceCliExitHook() {\n\tconst globalState = globalThis;\n\tconst state = globalState[DEFERRED_TURN_MAINTENANCE_CLI_EXIT_HOOK_KEY] ?? {};\n\tstate.cancelForCliExit = cancelActiveDeferredTurnMaintenanceRunsForCliExit;\n\tglobalState[DEFERRED_TURN_MAINTENANCE_CLI_EXIT_HOOK_KEY] = state;\n}\nregisterDeferredTurnMaintenanceCliExitHook();\nfunction markDeferredTurnMaintenanceTaskScheduleFailure(params) {",
             "context-engine-maintenance: register CLI-exit hook",
         ),
     ]
@@ -427,6 +466,108 @@ def _apply_context_engine_maintenance_patch(dist: Path, dry_run: bool) -> bool:
 
     for search, replacement, description in replacements:
         new_content, ok = _replace_once(new_content, search, replacement, description)
+        all_ok = all_ok and ok
+
+    if DEFERRED_MAINTENANCE_MARKER in content and CLI_EXIT_LOST_MARKER not in content:
+        new_content, ok = _replace_once_regex(
+            new_content,
+            re.compile(
+                r"function cancelDeferredTurnMaintenanceTask\(params\) \{[\s\S]*?\n\}\n"
+                r"function registerDeferredTurnMaintenanceCliExitHook\(\) \{"
+            ),
+            "function cancelDeferredTurnMaintenanceTask(params) {\n"
+            "\tconst task = findTaskByRunIdForOwner({\n"
+            "\t\trunId: params.runId,\n"
+            "\t\tcallerOwnerKey: params.sessionKey\n"
+            "\t});\n"
+            "\tif (!task) return;\n"
+            "\tif ([\"succeeded\", \"failed\", \"timed_out\", \"cancelled\", \"lost\"].includes(task.status)) return;\n"
+            "\tcancelTaskByIdForOwner({\n"
+            "\t\ttaskId: task.taskId,\n"
+            "\t\tcallerOwnerKey: params.sessionKey,\n"
+            "\t\tendedAt: Date.now(),\n"
+            "\t\tterminalSummary: params.terminalSummary\n"
+            "\t});\n"
+            "}\n"
+            "function markDeferredTurnMaintenanceTaskLost(params) {\n"
+            "\tconst task = findTaskByRunIdForOwner({\n"
+            "\t\trunId: params.runId,\n"
+            "\t\tcallerOwnerKey: params.sessionKey\n"
+            "\t});\n"
+            "\tif (!task) return;\n"
+            "\tif ([\"succeeded\", \"failed\", \"timed_out\", \"cancelled\", \"lost\"].includes(task.status)) return;\n"
+            "\tmarkTaskLostById({\n"
+            "\t\ttaskId: task.taskId,\n"
+            "\t\tendedAt: Date.now(),\n"
+            "\t\terror: params.error\n"
+            "\t});\n"
+            "}\n"
+            "async function cancelActiveDeferredTurnMaintenanceRunsForCliExit(params) {\n"
+            "\tconst activeEntries = Array.from(activeDeferredTurnMaintenanceRuns.entries());\n"
+            "\tif (activeEntries.length === 0) return;\n"
+            "\tabortDeferredTurnMaintenanceControllers({\n"
+            "\t\tprocessLike: process,\n"
+            "\t\treason: /* @__PURE__ */ new Error(\"short-lived CLI command completed before deferred maintenance\")\n"
+            "\t});\n"
+            "\tfor (const [activeSessionKey, state] of activeEntries) {\n"
+            "\t\tstate.rerunRequested = false;\n"
+            "\t\tactiveDeferredTurnMaintenanceRuns.delete(activeSessionKey);\n"
+            "\t\tif (!state.isWorkerStarted()) cancelDeferredTurnMaintenanceTask({\n"
+            "\t\t\tsessionKey: activeSessionKey,\n"
+            "\t\t\trunId: state.runId,\n"
+            "\t\t\tterminalSummary: \"Deferred maintenance cancelled because the CLI command completed.\"\n"
+            "\t\t});\n"
+            "\t\tconst lane = resolveDeferredTurnMaintenanceLane(activeSessionKey);\n"
+            "\t\tclearCommandLane(lane);\n"
+            "\t\tresetCommandLane(lane);\n"
+            "\t}\n"
+            "\tconst drainMs = Math.max(0, Math.floor(params?.drainMs ?? TURN_MAINTENANCE_CLI_EXIT_DRAIN_MS));\n"
+            "\tif (drainMs === 0) return;\n"
+            "\tconst settledSessionKeys = /* @__PURE__ */ new Set();\n"
+            "\tconst trackedPromises = activeEntries.map(([activeSessionKey, state]) => state.promise.finally(() => {\n"
+            "\t\tsettledSessionKeys.add(activeSessionKey);\n"
+            "\t}));\n"
+            "\tawait Promise.race([\n"
+            "\t\tPromise.allSettled(trackedPromises),\n"
+            "\t\tnew Promise((resolve) => {\n"
+            "\t\t\tconst timeout = setTimeout(resolve, drainMs);\n"
+            "\t\t\ttimeout.unref?.();\n"
+            "\t\t})\n"
+            "\t]);\n"
+            "\tfor (const [activeSessionKey, state] of activeEntries) {\n"
+            "\t\tif (!state.isWorkerStarted() || settledSessionKeys.has(activeSessionKey)) continue;\n"
+            "\t\tmarkDeferredTurnMaintenanceTaskLost({\n"
+            "\t\t\tsessionKey: activeSessionKey,\n"
+            "\t\t\trunId: state.runId,\n"
+            "\t\t\terror: \"Deferred maintenance did not stop before CLI exit after cancellation.\"\n"
+            "\t\t});\n"
+            "\t}\n"
+            "}\n"
+            "function registerDeferredTurnMaintenanceCliExitHook() {",
+            "context-engine-maintenance: upgrade active abort reporting semantics",
+        )
+        all_ok = all_ok and ok
+        new_content, ok = _replace_once_regex(
+            new_content,
+            re.compile(
+                r"\tlet runPromise;\n\ttry \{\n\t\trunPromise = enqueueCommandInLane\(resolveDeferredTurnMaintenanceLane\(sessionKey\), async \(\) => runDeferredTurnMaintenanceWorker\(\{([\s\S]*?\n\t\t)\}\)\);"
+            ),
+            "\tlet runPromise;\n"
+            "\tlet workerStarted = false;\n"
+            "\ttry {\n"
+            "\t\trunPromise = enqueueCommandInLane(resolveDeferredTurnMaintenanceLane(sessionKey), async () => {\n"
+            "\t\t\tworkerStarted = true;\n"
+            "\t\t\treturn await runDeferredTurnMaintenanceWorker({\\1});\n"
+            "\t\t});",
+            "context-engine-maintenance: track whether worker started",
+        )
+        all_ok = all_ok and ok
+        new_content, ok = _replace_once(
+            new_content,
+            "\t\ttaskId: task.taskId,\n\t\trunId: task.runId\n\t};",
+            "\t\ttaskId: task.taskId,\n\t\trunId: task.runId,\n\t\tisWorkerStarted: () => workerStarted\n\t};",
+            "context-engine-maintenance: expose worker-started state",
+        )
         all_ok = all_ok and ok
 
     if not all_ok:
