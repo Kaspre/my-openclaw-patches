@@ -5,18 +5,19 @@ Apply all OpenClaw patches in the correct order.
 Usage:
   python3 apply-all.py [--dry-run] [--dist-dir PATH]
 
-Active patches (last updated during 2026.5.18-beta.1 retirement pass):
+Active patches (last updated during 2026.5.25-beta.1 retirement pass):
   1. heartbeat-sessionkey              — partial upstream coverage; PR #80214 covers Change 4 only (Changes 1/2/3 still apply to 3 files)
   2. plugin-register-skip-on-inspection — partial upstream coverage; issue #56522 fix covers config schema path only (different loader surface still applies)
   3. cli-exit-fix                      — v2 minimal: synchronous wall-clock timer + post-resolve forced exit (entry.js + index.js only; no context-engine patches)
   4. plugin-metadata-snapshot-memo     — CLI bootstrap memo of loadPluginMetadataSnapshot (no upstream PR)
   5. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #6)
   6. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
-  7. snapshot-memo-multislot           — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with clone-storm-fix; Shakker's upstream hot-path fix obviates both cache patches)
-  8. clone-storm-fix                   — RETIRED on 2026.5.16-beta.3 + openclaw#82814 (paired with snapshot-memo-multislot)
-  9. codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403 merged upstream)
+  7. snapshot-memo-multislot           — RETIRED on 2026.5.16-beta.3 + openclaw#82814
+  8. clone-storm-fix                   — RETIRED on 2026.5.16-beta.3 + openclaw#82814
+  9. codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403)
  10. discord-guild-accepted-typing     — focused local backport of #76091/#79104 accepted typing gate for Discord guild channels with typingMode=instant
- 11. agent-local-agent-end-await       — await local CLI agent_end hooks before one-shot process teardown so OTEL/observation providers can flush
+ 11. agent-local-agent-end-await       — RETIRED on 2026.5.25-beta.1 (upstream awaitAgentHarnessAgentEndHook; our PR #85007)
+ 12. channel-selection-allow-bootstrap — RETIRED on 2026.5.25-beta.1 (upstream allowBootstrap:true in resolveAvailableKnownChannel)
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -26,6 +27,10 @@ Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED
 
 On hold:
   - sessions-manage-tool    — programmatic session compact/reset (PR #52422, apply on demand)
+
+Retired on v2026.5.25-beta.1:
+  - channel-selection-allow-bootstrap  — upstream passes allowBootstrap:true in resolveAvailableKnownChannel (channel-selection-*.js:26)
+  - agent-local-agent-end-await        — upstream adopted our PR #85007 approach; awaitAgentHarnessAgentEndHook now exported and awaited at local CLI terminal paths
 
 Retired on v2026.5.18-beta.1:
   - bootstrap-missing-marker-fix      — runtime path fixed upstream via resolver-level completed-workspace root BOOTSTRAP filtering; see docs/retired-bootstrap-missing-marker-fix-2026-05-19.md
@@ -172,26 +177,15 @@ PATCHES = [
     # the right SDK path. Retire when pnpm itself, the OC installer, or the
     # 5.19 fs-safe validator changes the contract so these survive a `--force`.
     ("peer-symlinks", "apply-peer-symlinks.py"),
-    # channel-selection-allow-bootstrap (2026-05-21): pass allowBootstrap:true
-    # in resolveAvailableKnownChannel's call to resolveOutboundChannelPlugin
-    # (channel-selection-*.js:23). Closes the in-agent message-tool path's
-    # plugin-load gap for --local agent dispatches that hit
-    # `Channel is unavailable: discord` 6+ times in 14 days (FRI-2026-05-07,
-    # -09, -10, -11, -14, -20, -21). RBP captured via /tmp/probe-channel-resolution.mjs:
-    # WITHOUT allowBootstrap → resolved=false; WITH allowBootstrap →
-    # resolved=true,id=discord,has_send_text=true. Findings doc:
-    # workspace/docs/findings/2026-05-20-discord-tool-path-channel-unavailable.md.
-    # Cross-references upstream #77254 (closed; that fix didn't touch the in-agent caller).
-    # Retire when upstream lands an equivalent fix.
-    ("channel-selection-allow-bootstrap", "apply-channel-selection-allow-bootstrap.py"),
-    # agent-local-agent-end-await (2026-05-21): local one-shot CLI agent
-    # terminal paths used to fire `agent_end` hooks and return immediately,
-    # allowing process teardown before observation-only providers such as OTEL
-    # flushed `openclaw.agent.turn`. Patch makes the lifecycle helper awaitable
-    # and awaits all seven local CLI terminal callsites. Persistent gateway/app
-    # runtimes intentionally remain fire-and-forget. Upstream draft PR:
-    # openclaw/openclaw#85007.
-    ("agent-local-agent-end-await", "apply-agent-local-agent-end-await.py"),
+    # Retired on v2026.5.25-beta.1: upstream now passes allowBootstrap:true
+    # in resolveAvailableKnownChannel (channel-selection-*.js:26). Our patch
+    # targeted the same call site. Verified 2026-05-26 on 5.25-beta.1.
+    # ("channel-selection-allow-bootstrap", "apply-channel-selection-allow-bootstrap.py"),
+    # Retired on v2026.5.25-beta.1: upstream adopted our PR #85007 approach.
+    # New `awaitAgentHarnessAgentEndHook` export at lifecycle-hook-helpers-*.js:81
+    # is awaited at cli-runner-*.js:70 and run-attempt-*.js:4781. Verified
+    # 2026-05-26 on 5.25-beta.1.
+    # ("agent-local-agent-end-await", "apply-agent-local-agent-end-await.py"),
     # sessions-manage-tool — NEEDS REVIEW on v2026.5.10-beta.2 (2026-05-10).
     # Patch script exists (apply-sessions-manage-tool.py) and was originally
     # for PR #52422 (closed by Kaspre 2026-04-26 as superseded). Dry-run on
