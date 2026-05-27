@@ -26,6 +26,7 @@ from pathlib import Path
 DIST_DIR = Path.home() / ".nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
 
 APPLIED_MARKER = "local agent command timed out after"
+FLUSH_MARKER = "openclaw.otel.preExit"
 OLD_SIGKILL_MARKER = "cli-exit-fix: hard wall-clock SIGKILL"
 
 
@@ -54,9 +55,14 @@ def _hard_timer_iife(proc: str) -> str:
 
 
 def _forced_exit(proc: str) -> str:
+    # Call the otel plugin's pre-exit flush hook (if registered) before
+    # exiting. The hook drains BatchSpanProcessor's queue to the collector
+    # so --local dispatches don't lose spans. Bounded to 3s by the plugin.
+    # The 3s SIGKILL fallback covers the case where flush itself hangs.
     return (
-        f"setTimeout(()=>{{try{{{proc}.kill({proc}.pid,'SIGKILL');}}catch{{}}}},3000);"
-        f"{proc}.exit({proc}.exitCode??0);"
+        f"const __f=globalThis[Symbol.for('openclaw.otel.preExit')];"
+        f"const __x=()=>{{setTimeout(()=>{{try{{{proc}.kill({proc}.pid,'SIGKILL');}}catch{{}}}},3000);{proc}.exit({proc}.exitCode??0);}};"
+        f"if(typeof __f==='function'){{__f().catch(()=>{{}}).then(__x);}}else{{__x();}}"
     )
 
 
@@ -71,7 +77,7 @@ RECIPES = [
         "build": lambda proc: (
             f"{_hard_timer_iife(proc)};"
             f"runLegacyCliEntry({proc}.argv)"
-            f".then(()=>{{{_forced_exit(proc)}}})"
+            f".then(async()=>{{{_forced_exit(proc)}}})"
             ".catch("
         ),
     },
@@ -155,8 +161,8 @@ def main():
 
         content = fpath.read_text()
 
-        # Already applied (v2)?
-        if APPLIED_MARKER in content and "readBestEffortConfig" not in content and OLD_SIGKILL_MARKER not in content:
+        # Already applied (v2 + flush hook)?
+        if APPLIED_MARKER in content and FLUSH_MARKER in content and "readBestEffortConfig" not in content and OLD_SIGKILL_MARKER not in content:
             print(f"OK: {recipe['desc']} (already applied)")
             continue
 
