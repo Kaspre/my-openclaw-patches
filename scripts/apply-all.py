@@ -5,19 +5,25 @@ Apply all OpenClaw patches in the correct order.
 Usage:
   python3 apply-all.py [--dry-run] [--dist-dir PATH]
 
-Active patches (last updated during 2026.5.25-beta.1 retirement pass):
+Active patches (last updated during 2026.5.26 stable retirement pass):
   1. heartbeat-sessionkey              — partial upstream coverage; PR #80214 covers Change 4 only (Changes 1/2/3 still apply to 3 files)
   2. plugin-register-skip-on-inspection — partial upstream coverage; issue #56522 fix covers config schema path only (different loader surface still applies)
   3. cli-exit-fix                      — v2 minimal: synchronous wall-clock timer + post-resolve forced exit (entry.js + index.js only; no context-engine patches)
-  4. plugin-metadata-snapshot-memo     — CLI bootstrap memo of loadPluginMetadataSnapshot (no upstream PR)
-  5. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #6)
-  6. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
-  7. snapshot-memo-multislot           — RETIRED on 2026.5.16-beta.3 + openclaw#82814
-  8. clone-storm-fix                   — RETIRED on 2026.5.16-beta.3 + openclaw#82814
-  9. codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403)
- 10. discord-guild-accepted-typing     — focused local backport of #76091/#79104 accepted typing gate for Discord guild channels with typingMode=instant
- 11. agent-local-agent-end-await       — RETIRED on 2026.5.25-beta.1 (upstream awaitAgentHarnessAgentEndHook; our PR #85007)
- 12. channel-selection-allow-bootstrap — RETIRED on 2026.5.25-beta.1 (upstream allowBootstrap:true in resolveAvailableKnownChannel)
+  4. web-search-onstartup              — flip exa/firecrawl plugin manifests to activation.onStartup=true (kept but proved insufficient on its own; see #5)
+  5. passive-plugin-hook-injection     — inject no-op `api.on("before_agent_start", () => {})` into exa/firecrawl register(api) bodies so manifest-hook-owner activation trigger fires in --local forks (the real fix for web_search providers not loading)
+  6. discord-guild-accepted-typing     — focused local backport of #76091/#79104 accepted typing gate for Discord guild channels with typingMode=instant
+  7. discord-voice-autojoin-retry      — retry voice autoJoin on non-fatal failure (30s setTimeout)
+  8. peer-symlinks                     — recreate peer-package symlinks destroyed by pnpm --force
+
+  RETIRED on 2026.5.26:
+  - plugin-metadata-snapshot-memo     — RETIRED on 2026.5.26 (upstream #84649 native snapshot caching; dry-run detects upstream-native-memo)
+
+  Previously retired:
+  - snapshot-memo-multislot           — RETIRED on 2026.5.16-beta.3 + openclaw#82814
+  - clone-storm-fix                   — RETIRED on 2026.5.16-beta.3 + openclaw#82814
+  - codex-raw-completion-fix          — RETIRED on 2026.5.16-beta.3 (openclaw#82403)
+  - agent-local-agent-end-await       — RETIRED on 2026.5.25-beta.1 (upstream awaitAgentHarnessAgentEndHook; our PR #85007)
+  - channel-selection-allow-bootstrap — RETIRED on 2026.5.25-beta.1 (upstream allowBootstrap:true in resolveAvailableKnownChannel)
 
 Wrapper workarounds (~/my-openclaw-backup/scripts/upgrade.sh) — UPSTREAM-FIXED in 5.10-beta.4+:
   - v-prefix verify rollback (#74069 → PR #80480)
@@ -108,13 +114,10 @@ PATCHES = [
     # dual-manifest extensions — silently dropped on OC 5.10+). Script kept
     # on disk; re-enable here if dry-run shows the fix didn't land.
     # ("plugin-ts-source-discovery-fix", "apply-plugin-ts-source-discovery-fix.py"),
-    # plugin-metadata-snapshot-memo (2026-05-11): in-process memo of
-    # loadPluginMetadataSnapshot. CLI bootstrap calls this ~5x per invocation,
-    # each rebuilding the same ~16s snapshot. With memo: openclaw plugins list
-    # drops from ~91s → ~7s (~13× speedup); gateway status drops from ~77s → ~19s.
-    # No-op for already-fast paths (--version/--help). Findings doc:
-    # workspace/docs/findings/2026-05-11-cli-startup-perf-investigation.md
-    ("plugin-metadata-snapshot-memo", "apply-plugin-metadata-snapshot-memo.py"),
+    # Retired on v2026.5.26 (2026-05-27): upstream #84649 + #85843 + #86678
+    # implement native plugin metadata snapshot caching. The apply script
+    # auto-detects the upstream memo and no-ops. Formally retired.
+    # ("plugin-metadata-snapshot-memo", "apply-plugin-metadata-snapshot-memo.py"),
     # Retired on v2026.5.16-beta.3 (2026-05-17) — PAIRED RETIREMENT with
     # clone-storm-fix below. Shakker's openclaw#82814 ("fix: reuse plugin
     # manifest metadata safely", 6 commits, merged to main 2026-05-17) takes
