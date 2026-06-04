@@ -36,6 +36,37 @@ PROFILE_DISCORD_DIST_DIR = (
 GLOBAL_OPENCLAW_DIST_DIR = (
     Path.home() / ".nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
 )
+
+
+def _live_discord_dist_from_installs() -> "Path | None":
+    """Resolve the discord plugin's LIVE dist dir from the gateway's installs.json.
+
+    OC 5.19+ installs plugins per-project under ~/.openclaw/npm/projects/<hash>/,
+    so PROFILE_DISCORD_DIST_DIR (the node_modules symlink) goes stale after an
+    upgrade — it keeps pointing at the prior version's .pnpm store. The gateway
+    loads the path recorded in installs.json, so patch THAT. Returns None if it
+    can't be resolved (callers still fall back to the node_modules/core dirs).
+    See findings: 2026-06-03 5.28 upgrade — discord patches missed the live tree.
+    """
+    import json
+    installs = Path.home() / ".openclaw/plugins/installs.json"
+    try:
+        for p in json.loads(installs.read_text()).get("plugins", []):
+            if p.get("pluginId") == "discord" and p.get("enabled"):
+                src = p.get("source", "")
+                if src.endswith("index.js"):
+                    d = Path(src).parent
+                elif p.get("rootDir"):
+                    d = Path(p["rootDir"]) / "dist"
+                else:
+                    continue
+                if d.is_dir():
+                    return d
+    except Exception:
+        pass
+    return None
+
+
 TARGET_GLOB = "message-handler-*.js"
 BACKUP_SUFFIX = ".bak-discord-guild-accepted-typing"
 
@@ -77,7 +108,13 @@ UPSTREAM_MARKERS = (
 def resolve_candidate_dirs(args: argparse.Namespace) -> list[Path]:
     if args.discord_dist_dir is not None:
         return [args.discord_dist_dir]
-    dirs = [PROFILE_DISCORD_DIST_DIR, GLOBAL_OPENCLAW_DIST_DIR]
+    # Live projects-dir tree first (what the gateway loaded), then the legacy
+    # node_modules symlink + core dist as fallbacks. Dedup below drops repeats.
+    dirs = []
+    live = _live_discord_dist_from_installs()
+    if live is not None:
+        dirs.append(live)
+    dirs += [PROFILE_DISCORD_DIST_DIR, GLOBAL_OPENCLAW_DIST_DIR]
     if args.dist_dir is not None:
         dirs.append(args.dist_dir)
 

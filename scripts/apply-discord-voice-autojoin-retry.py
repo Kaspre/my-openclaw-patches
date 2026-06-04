@@ -56,6 +56,38 @@ DIST_DIR_DEFAULT = os.path.expanduser(
     "~/.openclaw/npm/node_modules/@openclaw/discord/dist"
 )
 
+
+def _live_discord_dist_from_installs():
+    """Resolve the discord plugin's LIVE dist dir from the gateway's installs.json.
+
+    OC 5.19+ installs plugins per-project under ~/.openclaw/npm/projects/<hash>/,
+    so the top-level ~/.openclaw/npm/node_modules/@openclaw/discord symlink goes
+    stale after an upgrade (it keeps pointing at the prior version's .pnpm store).
+    The gateway loads the path recorded in installs.json — patch THAT, not the
+    symlink. Returns None if it can't be resolved (caller falls back to the legacy
+    node_modules path). See findings: 2026-06-03 5.28 upgrade — discord patches
+    missed the live projects-dir tree.
+    """
+    import json
+    installs = os.path.expanduser("~/.openclaw/plugins/installs.json")
+    try:
+        with open(installs, encoding="utf-8") as f:
+            for p in json.load(f).get("plugins", []):
+                if p.get("pluginId") == "discord" and p.get("enabled"):
+                    src = p.get("source", "")
+                    if src.endswith("index.js"):
+                        d = os.path.dirname(src)
+                    elif p.get("rootDir"):
+                        d = os.path.join(p["rootDir"], "dist")
+                    else:
+                        continue
+                    if os.path.isdir(d):
+                        return d
+    except Exception:
+        pass
+    return None
+
+
 BACKUP_SUFFIX = ".bak-autojoin-retry"
 
 # Exact tab-indented block from the unpatched manager.runtime bundle.
@@ -141,16 +173,21 @@ def apply_patch(path: str, dry_run: bool) -> tuple[bool, list[str]]:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true", help="show what would change without writing")
-    ap.add_argument("--dist-dir", default=DIST_DIR_DEFAULT, help=f"discord plugin dist dir (default: {DIST_DIR_DEFAULT})")
+    ap.add_argument("--dist-dir", default=None, help="discord plugin dist dir (default: live dir from installs.json, else node_modules)")
     args = ap.parse_args()
 
-    if not os.path.isdir(args.dist_dir):
-        print(f"ERROR: dist dir not found: {args.dist_dir}", file=sys.stderr)
-        return 2
+    # Prefer the LIVE dist the gateway actually loaded (installs.json), since the
+    # node_modules symlink can be stale after an upgrade. Explicit --dist-dir wins.
+    dist_dir = args.dist_dir or _live_discord_dist_from_installs() or DIST_DIR_DEFAULT
 
-    targets = find_target_files(args.dist_dir)
+    if not os.path.isdir(dist_dir):
+        print(f"ERROR: dist dir not found: {dist_dir}", file=sys.stderr)
+        return 2
+    print(f"discord dist dir: {dist_dir}", file=sys.stderr)
+
+    targets = find_target_files(dist_dir)
     if not targets:
-        print(f"ERROR: no manager.runtime-*.js found containing the autoJoin code under {args.dist_dir}", file=sys.stderr)
+        print(f"ERROR: no manager.runtime-*.js found containing the autoJoin code under {dist_dir}", file=sys.stderr)
         print("Upstream shape may have changed; check whether this patch is still needed.", file=sys.stderr)
         return 3
     if len(targets) > 1:
