@@ -209,6 +209,16 @@ PATCHES = [
     # 500-LOC context-engine/run-main.js Layer 1 from v1.
     # v1 kept at apply-cli-exit-fix.py for rollback.
     ("cli-exit-fix", "apply-cli-exit-fix-v2.py"),
+    # codex-codemode-pretooluse-binary (2026-06-05) — re-install the patched codex
+    # 0.135 binary that emits PreToolUse hooks for Code Mode `exec`
+    # (openai/codex#23411 / Bug A). NECESSARY-BUT-NOT-SUFFICIENT: the OC-side codex
+    # hook DELIVERY ("Bug B") is still dark on 6.1, so enforcement isn't restored
+    # yet; kept here so an upgrade re-applies it (with a loud warning if codex's
+    # version moved and the 0.135 artifact is stale). 204MB artifact is gitignored
+    # (rebuild from Kaspre/codex rebase/code-mode-pretooluse-0.135 via the GCP
+    # remote-build config codex-fwfix.conf). Doc:
+    # workspace/patches/codex-codemode-pretooluse-binary.md. Beads beads-workspace-8yp.
+    ("codex-codemode-pretooluse-binary", "apply-codex-codemode-pretooluse-binary.py"),
     # infer-model-run-ephemeral-session — RETIRED on v2026.5.16-beta.7
     # (2026-05-18): upstream PR #82861 landed early (memory said 5.17 ships,
     # but beta.7 already carries `runModelRun` constructing
