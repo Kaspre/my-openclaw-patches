@@ -22,7 +22,7 @@ creates / replaces it.
 
 Target structure:
   ~/.openclaw/npm/node_modules/.pnpm/<scope+pkg>@<ver>_*/node_modules/openclaw
-    → /home/captain/.nvm/versions/node/v26.1.0/lib/node_modules/openclaw
+    → /home/captain/.local/node-current/lib/node_modules/openclaw
 
 The script auto-discovers the active Node prefix via `node -p
 "path.join(process.execPath, '..', '..', 'lib/node_modules/openclaw')"` so
@@ -77,7 +77,7 @@ def resolve_global_sdk_path() -> Path:
         return Path(result.stdout.strip())
     except (subprocess.SubprocessError, FileNotFoundError):
         # Fallback for environments without node on PATH.
-        return Path.home() / ".nvm/versions/node/v26.1.0/lib/node_modules/openclaw"
+        return Path.home() / ".local/node-current/lib/node_modules/openclaw"
 
 
 def desired_link_targets(global_sdk: Path) -> list[tuple[Path, Path]]:

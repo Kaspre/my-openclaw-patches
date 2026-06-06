@@ -34,7 +34,7 @@ PROFILE_DISCORD_DIST_DIR = (
     Path.home() / ".openclaw/npm/node_modules/@openclaw/discord/dist"
 )
 GLOBAL_OPENCLAW_DIST_DIR = (
-    Path.home() / ".nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
+    Path.home() / ".local/node-current/lib/node_modules/openclaw/dist"
 )
 
 

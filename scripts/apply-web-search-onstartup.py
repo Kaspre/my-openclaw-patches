@@ -26,7 +26,7 @@ import shutil
 import sys
 from pathlib import Path
 
-DIST_DIR = Path.home() / ".nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist/extensions"
+DIST_DIR = Path.home() / ".local/node-current/lib/node_modules/openclaw/dist/extensions"
 
 TARGETS = ["exa", "firecrawl"]  # only the providers we have configured + API keys for
 

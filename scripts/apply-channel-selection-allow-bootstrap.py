@@ -45,7 +45,7 @@ import re
 import sys
 from pathlib import Path
 
-DIST_DIR = Path.home() / ".nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
+DIST_DIR = Path.home() / ".local/node-current/lib/node_modules/openclaw/dist"
 
 # Hash-suffix-tolerant glob for the bundled file (the suffix changes across
 # OC releases; the function name + structure does not).

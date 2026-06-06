@@ -46,7 +46,7 @@ import shutil
 import sys
 
 DIST_DIR_DEFAULT = os.path.expanduser(
-    "~/.nvm/versions/node/v26.1.0/lib/node_modules/openclaw/dist"
+    "~/.local/node-current/lib/node_modules/openclaw/dist"
 )
 
 BACKUP_SUFFIX = ".bak-channels-before-ws"
