@@ -14,6 +14,8 @@ Active patches (last updated during 2026.5.26 stable retirement pass):
   6. discord-guild-accepted-typing     — focused local backport of #76091/#79104 accepted typing gate for Discord guild channels with typingMode=instant
   7. discord-voice-autojoin-retry      — retry voice autoJoin on non-fatal failure (30s setTimeout)
   8. peer-symlinks                     — recreate peer-package symlinks destroyed by pnpm --force
+  9. openclaw-codex-native-pretool-delivery — install #90994 positive-delivery dist artifact
+ 10. codex-codemode-pretooluse-binary  — install patched codex 0.135 binary that emits Code Mode exec PreToolUse
 
   RETIRED on 2026.5.26:
   - plugin-metadata-snapshot-memo     — RETIRED on 2026.5.26 (upstream #84649 native snapshot caching; dry-run detects upstream-native-memo)
@@ -209,15 +211,20 @@ PATCHES = [
     # 500-LOC context-engine/run-main.js Layer 1 from v1.
     # v1 kept at apply-cli-exit-fix.py for rollback.
     ("cli-exit-fix", "apply-cli-exit-fix-v2.py"),
+    # openclaw-codex-native-pretool-delivery (2026-06-07): local dist artifact
+    # from openclaw/openclaw#90994 head 8e22ba40f0. Routes policy-active Codex
+    # native shell/code execution through the hookable unified-exec delivery path,
+    # keeps hook relay stdout protocol-clean, and rotates stale native-hook config
+    # fingerprints. Version-guarded to OpenClaw 2026.6.1. Artifact is gitignored.
+    ("openclaw-codex-native-pretool-delivery", "apply-openclaw-codex-native-pretool-delivery.py"),
     # codex-codemode-pretooluse-binary (2026-06-05) — re-install the patched codex
     # 0.135 binary that emits PreToolUse hooks for Code Mode `exec`
-    # (openai/codex#23411 / Bug A). NECESSARY-BUT-NOT-SUFFICIENT: the OC-side codex
-    # hook DELIVERY ("Bug B") is still dark on 6.1, so enforcement isn't restored
-    # yet; kept here so an upgrade re-applies it (with a loud warning if codex's
-    # version moved and the 0.135 artifact is stale). 204MB artifact is gitignored
-    # (rebuild from Kaspre/codex rebase/code-mode-pretooluse-0.135 via the GCP
-    # remote-build config codex-fwfix.conf). Doc:
-    # workspace/patches/codex-codemode-pretooluse-binary.md. Beads beads-workspace-8yp.
+    # (openai/codex#23411 / Bug A). This is paired with the OpenClaw-side delivery
+    # artifact above; both are required for positive enforcement. The script
+    # fails loud on missing/stale artifacts so upgrades cannot silently reopen the
+    # bypass. 204MB artifact is gitignored (rebuild from Kaspre/codex
+    # rebase/code-mode-pretooluse-0.135 via GCP remote-build config
+    # codex-fwfix.conf). Doc: docs/codex-pretooluse-patch-stack.md.
     ("codex-codemode-pretooluse-binary", "apply-codex-codemode-pretooluse-binary.py"),
     # infer-model-run-ephemeral-session — RETIRED on v2026.5.16-beta.7
     # (2026-05-18): upstream PR #82861 landed early (memory said 5.17 ships,

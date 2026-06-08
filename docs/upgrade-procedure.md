@@ -55,6 +55,10 @@
      this step until resolved).
    - At this point the gateway is still running on UNPATCHED code from step 4,
      so any decision here has a clean rollback path (just re-start the watchdog).
+   - Security-critical Codex PreToolUse patches must fail loud on missing/stale
+     artifacts. Do not continue if `codex-codemode-pretooluse-binary` or
+     `openclaw-codex-native-pretool-delivery` reports artifact, version, or marker
+     drift.
 
 8. **Apply only still-needed patches** — filenames change every version, search by code patterns not filenames
    ```bash
@@ -90,6 +94,13 @@ Upgrades have reset non-openclaw.json config files. Check these EVERY time:
 ## Post-Patch Testing
 
 - Verify: `openclaw --version && systemctl --user status openclaw-gateway --no-pager`
+- Verify the Codex PreToolUse patch stack:
+  ```bash
+  python3 ~/my-openclaw-patches/scripts/check-codex-pretooluse-stack.py
+  ~/.local/node-current/bin/node ~/my-openclaw-patches/scripts/prove-codex-code-mode-pretooluse.mjs
+  ```
+  Once the fail-closed hardening patch is promoted into the rotation, run the
+  static gate with `--require-fail-closed`.
 - Test Captain on Discord — confirm exec approval, heartbeat notifications, and basic functionality work
 - Confirm each applied patch is working as expected
 - Update patch docs with new filenames

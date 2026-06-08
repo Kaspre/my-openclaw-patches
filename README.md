@@ -15,7 +15,28 @@ python3 scripts/apply-all.py
 systemctl --user restart openclaw-gateway
 ```
 
-## Active Patches (v2026.4.12)
+## Critical Security Patch Stack
+
+Codex Code Mode `exec` firewall enforcement is a multi-patch local stack. Treat it
+as long-lived downstream maintenance, not as a temporary shim waiting on upstream.
+
+Required for positive delivery:
+- `apply-codex-codemode-pretooluse-binary.py`
+- `apply-openclaw-codex-native-pretool-delivery.py`
+
+Still pending promotion:
+- fail-closed hardening from draft `openclaw/openclaw#90805` or a narrower equivalent
+
+After every OpenClaw or Codex update:
+
+```bash
+python3 scripts/check-codex-pretooluse-stack.py
+~/.local/node-current/bin/node scripts/prove-codex-code-mode-pretooluse.mjs
+```
+
+Details: `docs/codex-pretooluse-patch-stack.md`.
+
+## Active Patches (historical table; see `scripts/apply-all.py` for the live order)
 
 | # | Script | Issue | Files | Description |
 |---|--------|-------|-------|-------------|
